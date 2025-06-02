@@ -1,8 +1,9 @@
+// This file is not actively used for database operations if using CSV as primary storage.
+// Kept in case other Firebase services (like Auth, if added later) are needed.
+// If no other Firebase services are planned, this can be removed.
 
 import { initializeApp, getApps, FirebaseApp } from "firebase/app";
-import { getFirestore, Firestore } from "firebase/firestore";
-// import { getAuth } from "firebase/auth"; // If you need Auth
-// import { getStorage } from "firebase/storage"; // If you need Storage
+// import { getFirestore, Firestore } from "firebase/firestore"; // Not used for DB if CSV is main storage
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -14,18 +15,23 @@ const firebaseConfig = {
 };
 
 let app: FirebaseApp;
-let db: Firestore;
-// let auth;
-// let storage;
+// let db: Firestore; // Not initialized if not used
 
-if (!getApps().length) {
-  app = initializeApp(firebaseConfig);
-} else {
-  app = getApps()[0];
+if (typeof window !== 'undefined') { // Ensure Firebase is initialized only on the client-side
+  if (!getApps().length) {
+    try {
+      app = initializeApp(firebaseConfig);
+    } catch (error) {
+      console.error("Firebase initialization error:", error);
+      // Handle initialization error, maybe show a message to the user
+    }
+  } else {
+    app = getApps()[0];
+  }
 }
 
-db = getFirestore(app);
-// auth = getAuth(app); // Initialize Auth if needed
-// storage = getStorage(app); // Initialize Storage if needed
 
-export { app, db /*, auth, storage */ };
+// db = getFirestore(app); // Do not initialize Firestore if not using it as primary DB
+
+// Export 'app' if needed for other Firebase services, but 'db' is commented out.
+export { app /*, db */ };

@@ -1,6 +1,5 @@
-// This file is no longer used as we are switching to Firebase Firestore.
+// This file is no longer used as CSV import/export is the primary storage.
 // It can be deleted from the project.
-// Kept temporarily to avoid breaking changes if any other part (unexpectedly) imports it.
-// Ensure all SQLite related logic is removed from src/app/page.tsx and other relevant files.
+// All database related logic (SQLite or Firestore) has been removed from src/app/page.tsx.
 
 export {};
