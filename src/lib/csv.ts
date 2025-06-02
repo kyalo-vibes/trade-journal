@@ -1,6 +1,7 @@
 
 import { format, parseISO, isValid } from 'date-fns';
 import type { JournalEntry, JournalData, TradeDirection } from './types';
+import { nanoid } from 'nanoid';
 
 // Consistent column order for CSV reliability
 const CSV_COLUMN_ORDER: (keyof JournalEntry | 'accountName' | 'initialBalance' | 'tradeNumber')[] = [
@@ -52,7 +53,7 @@ export function exportJournalDataToCSV(data: JournalData): void {
       date: entry.date instanceof Date && isValid(entry.date) ? format(entry.date, 'yyyy-MM-dd') : String(entry.date),
       screenshot: entry.screenshot && entry.screenshot.startsWith('data:image') ? 'has_screenshot_base64' : (entry.screenshot || ''),
     };
-    // Ensure fields not applicable to Withdrawal/Deposit are blank
+    
     if (entry.direction === 'Withdrawal' || entry.direction === 'Deposit') {
         entryDataForCSV.entryPrice = '';
         entryDataForCSV.positionSize = '';
@@ -60,7 +61,6 @@ export function exportJournalDataToCSV(data: JournalData): void {
         entryDataForCSV.tpPrice = '';
         entryDataForCSV.actualExitPrice = '';
         entryDataForCSV.rrr = '';
-        // entryDataForCSV.disciplineRating = ''; // Keep discipline rating or make it N/A if desired
         entryDataForCSV.reasonForExit = '';
     }
 
@@ -75,7 +75,8 @@ export function exportJournalDataToCSV(data: JournalData): void {
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
     const filenameSafeAccountName = accountName.replace(/[^a-z0-9]/gi, '_').toLowerCase() || 'journal';
-    link.setAttribute('download', `${filenameSafeAccountName}_${format(new Date(), 'yyyyMMdd_HHmmss')}.csv`);
+    // Removed timestamp for a more consistent filename, facilitating overwriting
+    link.setAttribute('download', `${filenameSafeAccountName}_journal.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
@@ -127,7 +128,7 @@ export function importJournalDataFromCSV(csvString: string): JournalData | null 
 
     let accountName = "Imported Account"; 
     let initialBalance = 0; 
-    const importedEntries: Omit<JournalEntry, 'id'>[] = []; 
+    const importedEntries: JournalEntry[] = []; 
 
     if (lines.length > 1) {
         const firstDataRowValues = parseCSVRow(lines[1]);
@@ -153,11 +154,11 @@ export function importJournalDataFromCSV(csvString: string): JournalData | null 
         continue;
       }
 
-      const entry: Partial<JournalEntry> = {};
+      const entry: Partial<JournalEntry> & { id?: string } = {}; // Allow id to be undefined initially
 
       (Object.keys(colIndices) as Array<keyof typeof colIndices>).forEach(key => {
         const index = colIndices[key]!;
-        if (index === undefined || values[index] === undefined) return; // Skip if column not found or value is undefined
+        if (index === undefined || values[index] === undefined) return;
         
         const value = values[index];
 
@@ -170,7 +171,7 @@ export function importJournalDataFromCSV(csvString: string): JournalData | null 
           case 'id': entry.id = value; break;
           case 'date': 
             const parsedDate = parseISO(value);
-            entry.date = isValid(parsedDate) ? parsedDate : new Date(); // Default to today if invalid
+            entry.date = isValid(parsedDate) ? parsedDate : new Date(); 
             if (!isValid(parsedDate)) console.warn(`Invalid date format for row: ${value}. Using current date.`);
             break;
           case 'time': entry.time = value; break;
@@ -182,13 +183,13 @@ export function importJournalDataFromCSV(csvString: string): JournalData | null 
           case 'slPrice': 
           case 'tpPrice': 
           case 'actualExitPrice': 
-          case 'pl': // This is amount for Withdrawal/Deposit
+          case 'pl':
             const numVal = parseFloat(value);
             (entry as any)[key] = isNaN(numVal) ? undefined : numVal;
             break;
           case 'disciplineRating':
             const rating = parseInt(value, 10);
-            entry.disciplineRating = (rating >= 1 && rating <= 5) ? rating as 1 | 2 | 3 | 4 | 5 : 3; // Default to 3 if invalid
+            entry.disciplineRating = (rating >= 1 && rating <= 5) ? rating as 1 | 2 | 3 | 4 | 5 : 3; 
             break;
           case 'rrr': entry.rrr = value; break;
           case 'screenshot':
@@ -207,13 +208,15 @@ export function importJournalDataFromCSV(csvString: string): JournalData | null 
         }
       });
       
-      // Basic validation for a usable entry
-      if (entry.date && entry.time && entry.direction && entry.market && entry.accountBalanceAtEntry !== undefined && entry.disciplineRating !== undefined) {
-         // For withdrawals/deposits, P/L (amount) is crucial
+      if (!entry.id) {
+        entry.id = nanoid(); // Assign a new ID if one wasn't found in the CSV
+      }
+
+      if (entry.date && entry.time && entry.direction && entry.market && entry.accountBalanceAtEntry !== undefined && entry.disciplineRating !== undefined && entry.id) {
          if ((entry.direction === 'Withdrawal' || entry.direction === 'Deposit') && entry.pl === undefined) {
             console.warn("Skipping Withdrawal/Deposit row due to missing amount (P/L field). Parsed data:", entry, "Original line:", line);
          } else {
-            importedEntries.push(entry as Omit<JournalEntry, 'id'>); 
+            importedEntries.push(entry as JournalEntry); 
          }
       } else {
         console.warn("Skipping row due to missing required fields or parse errors. Parsed data:", entry, "Original line:", line);
