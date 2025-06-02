@@ -32,18 +32,17 @@ const entrySchema = z.object({
   positionSize: z.coerce.number().optional(),
   slPrice: z.coerce.number().optional(),
   tpPrice: z.coerce.number().optional(),
-  actualExitPrice: z.coerce.number().optional(), // Made optional for ongoing trades
-  pl: z.coerce.number().optional(), // Made optional for ongoing trades
-  screenshot: z.any().optional(), // Keep as any for FileList or string (base64)
+  actualExitPrice: z.coerce.number().optional(),
+  pl: z.coerce.number().optional(),
+  screenshot: z.any().optional(),
   notes: z.string().optional(),
   disciplineRating: z.coerce.number().min(1).max(5),
   emotionalState: z.string().optional(),
   session: z.string().optional(),
   reasonForEntry: z.string().optional(),
   reasonForExit: z.string().optional(),
-  // For internal use, not part of the schema submitted directly to parent unless editing
   id: z.string().optional(),
-  accountBalanceAtEntry: z.coerce.number().optional(), 
+  accountBalanceAtEntry: z.coerce.number().optional(),
 }).superRefine((data, ctx) => {
   if (data.direction && data.direction !== 'No Trade') {
     if (data.entryPrice === undefined || data.entryPrice === null || isNaN(data.entryPrice)) {
@@ -58,7 +57,6 @@ const entrySchema = z.object({
     if (data.positionSize === undefined || data.positionSize === null || isNaN(data.positionSize) || data.positionSize <= 0) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Position Size must be a positive number for trades.', path: ['positionSize'] });
     }
-    // actualExitPrice and pl are now fully optional for trades until edited to be closed.
   }
 });
 
@@ -66,7 +64,7 @@ type JournalEntryFormData = z.infer<typeof entrySchema>;
 
 interface JournalEntryFormProps {
   onSave: (data: Omit<JournalEntry, 'id' | 'accountBalanceAtEntry' | 'rrr'> | JournalEntry) => void;
-  accountBalanceAtFormInit: number; // This will be the original balance if editing, or current if new
+  accountBalanceAtFormInit: number;
   disabled?: boolean;
   entryToEdit?: JournalEntry | null;
   onCancelEdit?: () => void;
@@ -96,6 +94,15 @@ const getDefaultTime = () => {
     const now = new Date();
     return format(now, 'HH:mm');
 };
+
+const marketOptions = [
+  'SPX500', 'NASDAQ100', 'DOW30', 
+  'EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 
+  'BTCUSD', 'ETHUSD', 'SOLUSD', 
+  'AAPL', 'TSLA', 'MSFT', 'AMZN', 'GOOGL',
+  'Gold (XAUUSD)', 'Crude Oil (WTI)', 'Natural Gas',
+  'Other Forex', 'Other Crypto', 'Other Stock', 'Other Commodity', 'Other Index'
+];
 
 
 export const JournalEntryForm = forwardRef(({ onSave, accountBalanceAtFormInit, disabled, entryToEdit, onCancelEdit }, ref) => {
@@ -156,6 +163,7 @@ export const JournalEntryForm = forwardRef(({ onSave, accountBalanceAtFormInit, 
         reasonForEntry: '',
         reasonForExit: '',
         screenshot: undefined,
+        // id and accountBalanceAtEntry are not part of form defaults managed by RHF for new entries
       });
       setScreenshotPreview(null);
       setScreenshotName(null);
@@ -169,8 +177,13 @@ export const JournalEntryForm = forwardRef(({ onSave, accountBalanceAtFormInit, 
         ...entryToEdit,
         date: entryToEdit.date ? new Date(entryToEdit.date) : new Date(),
         time: defaultTime,
-        // Keep screenshot as is (it's a string if loaded, or undefined)
-        // RHF will handle undefined for optional number fields correctly internally
+        entryPrice: entryToEdit.entryPrice ?? undefined,
+        positionSize: entryToEdit.positionSize ?? undefined,
+        slPrice: entryToEdit.slPrice ?? undefined,
+        tpPrice: entryToEdit.tpPrice ?? undefined,
+        actualExitPrice: entryToEdit.actualExitPrice ?? undefined,
+        pl: entryToEdit.pl ?? undefined,
+        accountBalanceAtEntry: entryToEdit.accountBalanceAtEntry, // This is from the entry, not form init
       });
       if (typeof entryToEdit.screenshot === 'string' && entryToEdit.screenshot.startsWith('data:image')) {
         setScreenshotPreview(entryToEdit.screenshot);
@@ -180,7 +193,7 @@ export const JournalEntryForm = forwardRef(({ onSave, accountBalanceAtFormInit, 
         setScreenshotName(null);
       }
     } else {
-      reset({ // Reset to default new entry form
+      reset({ 
         date: new Date(),
         time: getDefaultTime(),
         direction: undefined,
@@ -212,7 +225,9 @@ export const JournalEntryForm = forwardRef(({ onSave, accountBalanceAtFormInit, 
   useEffect(() => {
     if (direction && direction !== 'No Trade' && actualExitPrice !== undefined && entryPrice !== undefined && positionSize !== undefined && !isNaN(actualExitPrice) && !isNaN(entryPrice) && !isNaN(positionSize)) {
         const plPoints = direction === 'Long' ? actualExitPrice - entryPrice : entryPrice - actualExitPrice;
-        setEstimatedPl(`Points: ${(plPoints * positionSize).toFixed(2)} (Broker P/L is source of truth)`);
+        // P/L calculation should reflect the actual currency value if possible, or points value if currency per point is not available
+        // For now, if 'pl' field is filled, it's the source of truth. If not, this is an estimate.
+        setEstimatedPl(`Points value: ${(plPoints * positionSize).toFixed(2)}. Use P/L field for actual currency value.`);
     } else {
         setEstimatedPl("Estimated P/L: N/A");
     }
@@ -229,25 +244,31 @@ export const JournalEntryForm = forwardRef(({ onSave, accountBalanceAtFormInit, 
         reader.onloadend = () => resolve(reader.result as string);
         reader.readAsDataURL(file);
       });
-    } else if (typeof data.screenshot === 'string') { // Keep existing screenshot if editing and not changed
+    } else if (typeof data.screenshot === 'string') { 
         screenshotData = data.screenshot;
     }
     
-    const submissionData = {
+    const submissionData: Omit<JournalEntry, 'id' | 'accountBalanceAtEntry' | 'rrr'> | JournalEntry = {
       ...data,
       date: data.date, 
-      pl: data.pl, 
+      pl: data.pl ?? undefined,
+      entryPrice: data.entryPrice ?? undefined,
+      positionSize: data.positionSize ?? undefined,
+      slPrice: data.slPrice ?? undefined,
+      tpPrice: data.tpPrice ?? undefined,
+      actualExitPrice: data.actualExitPrice ?? undefined,
       screenshot: screenshotData,
     };
 
     if (isEditing && entryToEdit) {
       onSave({ 
-        ...entryToEdit, // Spread original entry to keep id and original accountBalanceAtEntry
-        ...submissionData, // Override with form data
+        ...entryToEdit, 
+        ...submissionData,
+        accountBalanceAtEntry: entryToEdit.accountBalanceAtEntry, // Ensure this is preserved from original
       } as JournalEntry);
     } else {
       // For new entries, id and accountBalanceAtEntry will be set by parent
-      const { id, accountBalanceAtEntry, ...newEntryData } = submissionData;
+      const { id, accountBalanceAtEntry, ...newEntryData } = submissionData as JournalEntry; // Cast to access props
       onSave(newEntryData as Omit<JournalEntry, 'id' | 'accountBalanceAtEntry' | 'rrr'>);
     }
   };
@@ -272,11 +293,12 @@ export const JournalEntryForm = forwardRef(({ onSave, accountBalanceAtFormInit, 
   const commonInputClass = "bg-muted border-border focus:ring-primary";
   const commonLabelClass = "mb-1 text-sm font-medium";
 
-  const numericFieldProps = (field: any) => ({
+  const numericFieldProps = (field: any) => ({ // field can be from Controller render props
     ...field,
-    value: field.value ?? '', // Prevents controlled/uncontrolled warning
+    value: field.value === undefined || field.value === null || isNaN(field.value) ? '' : String(field.value),
     onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
       const val = e.target.value;
+      // Allow empty string for clearing, otherwise parse as float
       field.onChange(val === '' ? undefined : parseFloat(val));
     },
   });
@@ -337,14 +359,24 @@ export const JournalEntryForm = forwardRef(({ onSave, accountBalanceAtFormInit, 
                 <Controller
                   name="market"
                   control={control}
-                  render={({ field }) => <Input id="market" {...field} placeholder="e.g., NASDAQ, EURUSD" className={commonInputClass} />}
+                  render={({ field }) => (
+                    <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value}>
+                      <SelectTrigger id="market" className={commonInputClass}>
+                        <SelectValue placeholder="Select market/asset" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {marketOptions.map(opt => <SelectItem key={opt} value={opt}>{opt}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  )}
                 />
                 {errors.market && <p className="text-destructive text-xs mt-1">{errors.market.message}</p>}
               </div>
 
+
               <div>
                   <Label className={commonLabelClass}>Account Balance (at entry)</Label>
-                  <Input value={accountBalanceAtFormInit.toFixed(2)} readOnly disabled className={`${commonInputClass} opacity-70 cursor-not-allowed`} />
+                  <Input value={isEditing && entryToEdit ? entryToEdit.accountBalanceAtEntry.toFixed(2) : accountBalanceAtFormInit.toFixed(2)} readOnly disabled className={`${commonInputClass} opacity-70 cursor-not-allowed`} />
               </div>
 
               {isTrade && (
@@ -394,7 +426,7 @@ export const JournalEntryForm = forwardRef(({ onSave, accountBalanceAtFormInit, 
                     <Controller
                       name="actualExitPrice"
                       control={control}
-                      render={({ field }) => <Input type="number" step="any" id="actualExitPrice" {...numericFieldProps(field)} className={commonInputClass} />}
+                      render={({ field }) => <Input type="number" step="any" id="actualExitPrice" {...numericFieldProps(field)} className={commonInputClass} placeholder="Leave blank if ongoing" />}
                     />
                     {errors.actualExitPrice && <p className="text-destructive text-xs mt-1">{errors.actualExitPrice.message}</p>}
                   </div>
@@ -424,12 +456,12 @@ export const JournalEntryForm = forwardRef(({ onSave, accountBalanceAtFormInit, 
                 <Controller
                     name="screenshot"
                     control={control}
-                    render={({ field: { onChange, value, ...restField }}) => ( // Exclude value from input for File type
+                    render={({ field: { onChange, value, ...restField }}) => (
                         <Input 
                         type="file" 
                         id="screenshot" 
-                        accept="image/jpeg, image/png" 
-                        onChange={handleScreenshotChange} // Use custom handler to update RHF and preview
+                        accept="image/jpeg, image/png, image/gif, image/webp" 
+                        onChange={handleScreenshotChange}
                         className={`${commonInputClass} file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-primary-foreground hover:file:bg-primary/90`}
                         {...restField}
                         />
@@ -437,7 +469,7 @@ export const JournalEntryForm = forwardRef(({ onSave, accountBalanceAtFormInit, 
                 />
                 {screenshotPreview && (
                   <div className="mt-2">
-                    <img src={screenshotPreview} alt="Screenshot preview" className="max-h-48 rounded-md border border-border" />
+                    <img src={screenshotPreview} alt="Screenshot preview" className="max-h-48 rounded-md border border-border" data-ai-hint="chart graph" />
                     <p className="text-xs text-muted-foreground mt-1">{screenshotName || "Screenshot preview"}</p>
                   </div>
                 )}
@@ -473,34 +505,38 @@ export const JournalEntryForm = forwardRef(({ onSave, accountBalanceAtFormInit, 
               <Controller
                 name="notes"
                 control={control}
-                render={({ field }) => <Textarea id="notes" {...field} rows={4} placeholder="Your thoughts, observations, lessons learned..." className={commonInputClass} />}
+                render={({ field }) => <Textarea id="notes" {...field} value={field.value ?? ''} rows={4} placeholder="Your thoughts, observations, lessons learned..." className={commonInputClass} />}
               />
               {errors.notes && <p className="text-destructive text-xs mt-1">{errors.notes.message}</p>}
             </div>
             
-            <Card className="bg-muted/50 border-border p-4">
-               <h3 className="text-lg font-headline mb-3">Additional Details</h3>
-               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <Card className="bg-muted/50 border-border p-4 md:p-6">
+               <h3 className="text-lg font-headline mb-4">Additional Details</h3>
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
                   <div>
                       <Label htmlFor="session" className={commonLabelClass}>Session (e.g., London, NY)</Label>
-                      <Controller name="session" control={control} render={({ field }) => <Input id="session" {...field} className={commonInputClass} />} />
-                  </div>
-                  <div>
-                      <Label htmlFor="reasonForEntry" className={commonLabelClass}>{isTrade ? 'Reason for Entry' : 'Reason for Analysis'}</Label>
-                      <Controller name="reasonForEntry" control={control} render={({ field }) => <Textarea id="reasonForEntry" {...field} rows={2} className={commonInputClass} />} />
-                  </div>
-                  <div>
-                      <Label htmlFor="reasonForExit" className={commonLabelClass}>{isTrade ? 'Reason for Exit / No Trade' : 'Reason for No Trade'}</Label>
-                      <Controller name="reasonForExit" control={control} render={({ field }) => <Textarea id="reasonForExit" {...field} rows={2} className={commonInputClass} />} />
+                      <Controller name="session" control={control} render={({ field }) => <Input id="session" {...field} value={field.value ?? ''} className={commonInputClass} placeholder="e.g., New York Open" />} />
+                       {errors.session && <p className="text-destructive text-xs mt-1">{errors.session.message}</p>}
                   </div>
                    <div>
                       <Label htmlFor="emotionalState" className={commonLabelClass}>Emotional State of Mind</Label>
-                      <Controller name="emotionalState" control={control} render={({ field }) => <Input id="emotionalState" {...field} className={commonInputClass} />} />
+                      <Controller name="emotionalState" control={control} render={({ field }) => <Input id="emotionalState" {...field} value={field.value ?? ''} className={commonInputClass} placeholder="e.g., Calm, Anxious, FOMO" />} />
+                      {errors.emotionalState && <p className="text-destructive text-xs mt-1">{errors.emotionalState.message}</p>}
+                  </div>
+                  <div className="md:col-span-2">
+                      <Label htmlFor="reasonForEntry" className={commonLabelClass}>{isTrade ? 'Reason for Entry' : 'Reason for Analysis'}</Label>
+                      <Controller name="reasonForEntry" control={control} render={({ field }) => <Textarea id="reasonForEntry" {...field} value={field.value ?? ''} rows={2} className={commonInputClass} placeholder="e.g., Break of structure, News catalyst" />} />
+                      {errors.reasonForEntry && <p className="text-destructive text-xs mt-1">{errors.reasonForEntry.message}</p>}
+                  </div>
+                  <div className="md:col-span-2">
+                      <Label htmlFor="reasonForExit" className={commonLabelClass}>{isTrade ? 'Reason for Exit / No Trade' : 'Reason for No Trade Decision'}</Label>
+                      <Controller name="reasonForExit" control={control} render={({ field }) => <Textarea id="reasonForExit" {...field} value={field.value ?? ''} rows={2} className={commonInputClass} placeholder="e.g., Target hit, SL hit, Invalidated setup" />} />
+                      {errors.reasonForExit && <p className="text-destructive text-xs mt-1">{errors.reasonForExit.message}</p>}
                   </div>
                </div>
             </Card>
           </fieldset>
-          <div className="flex space-x-3">
+          <div className="flex space-x-3 pt-2">
             <Button type="submit" size="lg" className="font-headline" disabled={disabled || (!isDirty && isEditing)}>
               {isEditing ? <><Edit3 className="mr-2 h-5 w-5" /> Update Entry</> : <><PlusCircle className="mr-2 h-5 w-5" /> Add Entry</>}
             </Button>
