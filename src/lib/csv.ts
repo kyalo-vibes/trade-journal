@@ -51,7 +51,8 @@ export function exportJournalDataToCSV(data: JournalData): void {
       initialBalance, 
       ...entry,
       date: entry.date instanceof Date && isValid(entry.date) ? format(entry.date, 'yyyy-MM-dd') : String(entry.date),
-      screenshot: entry.screenshot && entry.screenshot.startsWith('data:image') ? 'has_screenshot_base64' : (entry.screenshot || ''),
+      // Store the full Base64 data URI for the screenshot if it exists
+      screenshot: entry.screenshot || '', 
     };
     
     if (entry.direction === 'Withdrawal' || entry.direction === 'Deposit') {
@@ -75,7 +76,6 @@ export function exportJournalDataToCSV(data: JournalData): void {
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
     const filenameSafeAccountName = accountName.replace(/[^a-z0-9]/gi, '_').toLowerCase() || 'journal';
-    // Removed timestamp for a more consistent filename, facilitating overwriting
     link.setAttribute('download', `${filenameSafeAccountName}_journal.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
@@ -193,7 +193,8 @@ export function importJournalDataFromCSV(csvString: string): JournalData | null 
             break;
           case 'rrr': entry.rrr = value; break;
           case 'screenshot':
-            entry.screenshot = value === 'has_screenshot_base64' ? 'Screenshot was present (re-upload from original if needed)' : (value || undefined);
+            // Directly use the value from CSV, assuming it's a Base64 string or empty
+            entry.screenshot = value || undefined; 
             break;
           case 'notes': entry.notes = value; break;
           case 'emotionalState': entry.emotionalState = value; break;
@@ -234,3 +235,4 @@ export function importJournalDataFromCSV(csvString: string): JournalData | null 
     return null;
   }
 }
+
