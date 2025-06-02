@@ -13,14 +13,15 @@ import {
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
 import type { JournalEntry } from '@/lib/types';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { format } from 'date-fns';
-// import Image from 'next/image'; // Image component not used for base64 string directly
-import { TrendingUp, TrendingDown, Ban, ExternalLink } from 'lucide-react';
+import { TrendingUp, TrendingDown, Ban, ExternalLink, Edit } from 'lucide-react';
 import { cn } from "@/lib/utils"
 
 
 interface JournalTableProps {
   entries: JournalEntry[];
+  onEdit: (entry: JournalEntry) => void;
 }
 
 const DirectionIcon = ({ direction }: { direction: JournalEntry['direction'] }) => {
@@ -30,7 +31,7 @@ const DirectionIcon = ({ direction }: { direction: JournalEntry['direction'] }) 
 };
 
 
-export function JournalTable({ entries }: JournalTableProps) {
+export function JournalTable({ entries, onEdit }: JournalTableProps) {
   if (entries.length === 0) {
     return <p className="text-center text-muted-foreground py-8">No journal entries yet. Add one using the form above!</p>;
   }
@@ -40,6 +41,7 @@ export function JournalTable({ entries }: JournalTableProps) {
       <Table className="min-w-full bg-card">
         <TableHeader className="bg-muted/50">
           <TableRow>
+            <TableHead className="font-headline text-foreground w-[100px]">Actions</TableHead>
             <TableHead className="font-headline text-foreground">Date</TableHead>
             <TableHead className="font-headline text-foreground">Time</TableHead>
             <TableHead className="font-headline text-foreground">Direction</TableHead>
@@ -64,7 +66,12 @@ export function JournalTable({ entries }: JournalTableProps) {
         <TableBody>
           {entries.map((entry) => (
             <TableRow key={entry.id} className="hover:bg-muted/80">
-              <TableCell>{entry.date instanceof Date ? format(entry.date, 'yyyy-MM-dd') : 'Invalid Date'}</TableCell>
+              <TableCell>
+                <Button variant="outline" size="sm" onClick={() => onEdit(entry)} className="font-headline">
+                  <Edit className="mr-2 h-4 w-4" /> Edit
+                </Button>
+              </TableCell>
+              <TableCell>{entry.date instanceof Date ? format(entry.date, 'yyyy-MM-dd') : String(entry.date)}</TableCell>
               <TableCell>{entry.time}</TableCell>
               <TableCell>
                 <Badge variant={entry.direction === 'No Trade' ? 'outline' : entry.direction === 'Long' ? 'default' : 'destructive'} 
@@ -90,7 +97,7 @@ export function JournalTable({ entries }: JournalTableProps) {
                 "text-right font-semibold",
                 entry.pl !== undefined ? (entry.pl >= 0 ? 'text-positive' : 'text-negative') : ''
               )}>
-                {entry.pl?.toFixed(2) ?? 'N/A'}
+                {entry.pl?.toFixed(2) ?? (entry.direction === "No Trade" ? "N/A" : <span className="italic text-xs text-muted-foreground">Ongoing</span>) }
               </TableCell>
               <TableCell className="text-right">{entry.accountBalanceAtEntry.toFixed(2)}</TableCell>
               <TableCell>
@@ -109,12 +116,12 @@ export function JournalTable({ entries }: JournalTableProps) {
                   'N/A'
                 )}
               </TableCell>
-              <TableCell className="max-w-xs truncate whitespace-normal" title={entry.notes}>{entry.notes ?? 'N/A'}</TableCell>
+              <TableCell className="max-w-[200px] truncate whitespace-normal" title={entry.notes}>{entry.notes ?? 'N/A'}</TableCell>
               <TableCell className="text-center">{entry.disciplineRating}/5</TableCell>
-              <TableCell className="max-w-xs truncate whitespace-normal" title={entry.emotionalState}>{entry.emotionalState ?? 'N/A'}</TableCell>
+              <TableCell className="max-w-[150px] truncate whitespace-normal" title={entry.emotionalState}>{entry.emotionalState ?? 'N/A'}</TableCell>
               <TableCell>{entry.session ?? 'N/A'}</TableCell>
-              <TableCell className="max-w-xs truncate whitespace-normal" title={entry.reasonForEntry}>{entry.reasonForEntry ?? 'N/A'}</TableCell>
-              <TableCell className="max-w-xs truncate whitespace-normal" title={entry.reasonForExit}>{entry.reasonForExit ?? 'N/A'}</TableCell>
+              <TableCell className="max-w-[200px] truncate whitespace-normal" title={entry.reasonForEntry}>{entry.reasonForEntry ?? 'N/A'}</TableCell>
+              <TableCell className="max-w-[200px] truncate whitespace-normal" title={entry.reasonForExit}>{entry.reasonForExit ?? 'N/A'}</TableCell>
             </TableRow>
           ))}
         </TableBody>
@@ -123,3 +130,4 @@ export function JournalTable({ entries }: JournalTableProps) {
     </ScrollArea>
   );
 }
+    

@@ -11,9 +11,9 @@ import { Button } from '@/components/ui/button';
 import { exportJournalDataToCSV, importJournalDataFromCSV } from '@/lib/csv';
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Download, UploadCloud, DollarSign, ListChecks, Loader2 } from 'lucide-react';
+import { Download, UploadCloud, DollarSign, ListChecks, Loader2, RefreshCw } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
-import { nanoid } from 'nanoid'; // For generating unique IDs for entries
+import { nanoid } from 'nanoid';
 
 const calculateRRR = (direction?: JournalEntry['direction'], entryPrice?: number, slPrice?: number, tpPrice?: number): string => {
   if (!direction || direction === 'No Trade' || entryPrice === undefined || slPrice === undefined || tpPrice === undefined) return "N/A";
@@ -50,27 +50,27 @@ export default function TradingJournalPage() {
   const [currentBalance, setCurrentBalance] = useState<number>(initialBalance);
   const [accountBalanceForNewEntry, setAccountBalanceForNewEntry] = useState<number>(initialBalance);
   
+  const [editingEntry, setEditingEntry] = useState<JournalEntry | null>(null);
   const [isProcessingFile, setIsProcessingFile] = useState<boolean>(false);
   const [isPending, startTransition] = useTransition();
 
-
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const journalFormRef = useRef<{ resetForm: () => void }>(null);
 
-  // Calculate current balance and balance for new entry whenever initialBalance or entries change
+
   useEffect(() => {
     const totalPL = journalEntries.reduce((sum, entry) => sum + (entry.pl || 0), 0);
     const newCurrentBalance = initialBalance + totalPL;
     setCurrentBalance(newCurrentBalance);
 
     if (journalEntries.length > 0) {
-        const lastEntry = journalEntries[journalEntries.length - 1];
-        if (lastEntry && lastEntry.accountBalanceAtEntry !== undefined && lastEntry.pl !== undefined) {
-            setAccountBalanceForNewEntry(lastEntry.accountBalanceAtEntry + (lastEntry.pl || 0));
-        } else if (lastEntry && lastEntry.accountBalanceAtEntry !== undefined) {
-            setAccountBalanceForNewEntry(lastEntry.accountBalanceAtEntry);
+        const lastEntryWithPL = [...journalEntries].reverse().find(entry => entry.pl !== undefined);
+        if (lastEntryWithPL) {
+            setAccountBalanceForNewEntry(lastEntryWithPL.accountBalanceAtEntry + (lastEntryWithPL.pl || 0));
         } else {
-             // Fallback if last entry doesn't have proper balance info
+            // If no entries have P/L, use the initial balance plus P/L of all entries (which would be 0 if no P/L)
+            // Or more simply, the current balance, which already accounts for this.
             setAccountBalanceForNewEntry(newCurrentBalance);
         }
     } else {
@@ -81,29 +81,45 @@ export default function TradingJournalPage() {
 
   const handleAccountNameChange = (newName: string) => {
     setAccountName(newName); 
-    // This change is in-memory and will be saved on next export
   };
 
   const handleInitialBalanceChange = (newBalance: number) => {
     setInitialBalance(newBalance);
-    // This change is in-memory and will be saved on next export
   };
 
-  const handleAddEntry = useCallback((newEntryData: Omit<JournalEntry, 'id' | 'accountBalanceAtEntry' | 'rrr'>) => {
+  const handleSaveEntry = useCallback((entryData: Omit<JournalEntry, 'id' | 'accountBalanceAtEntry' | 'rrr'> | JournalEntry) => {
     startTransition(() => {
-      const rrr = calculateRRR(newEntryData.direction, newEntryData.entryPrice, newEntryData.slPrice, newEntryData.tpPrice);
-      
-      const entryToAdd: JournalEntry = {
-        id: nanoid(), // Generate a unique ID for the entry
-        ...newEntryData,
-        accountBalanceAtEntry: accountBalanceForNewEntry,
-        rrr: rrr,
-      };
-
-      setJournalEntries(prevEntries => [...prevEntries, entryToAdd]);
-      toast({ title: "Entry Added", description: `Trade for ${newEntryData.market} logged locally.` });
+      if ('id' in entryData) { // Editing existing entry
+        const rrr = calculateRRR(entryData.direction, entryData.entryPrice, entryData.slPrice, entryData.tpPrice);
+        const updatedEntry = { ...entryData, rrr };
+        setJournalEntries(prevEntries => prevEntries.map(e => e.id === updatedEntry.id ? updatedEntry : e));
+        toast({ title: "Entry Updated", description: `Trade for ${updatedEntry.market} has been updated.` });
+        setEditingEntry(null); // Clear editing state
+      } else { // Adding new entry
+        const rrr = calculateRRR(entryData.direction, entryData.entryPrice, entryData.slPrice, entryData.tpPrice);
+        const entryToAdd: JournalEntry = {
+          id: nanoid(),
+          ...entryData,
+          accountBalanceAtEntry: accountBalanceForNewEntry, // Use calculated balance for new entries
+          rrr: rrr,
+        };
+        setJournalEntries(prevEntries => [...prevEntries, entryToAdd]);
+        toast({ title: "Entry Added", description: `Trade for ${entryData.market} logged.` });
+      }
+      journalFormRef.current?.resetForm();
     });
-  }, [accountBalanceForNewEntry, toast]);
+  }, [accountBalanceForNewEntry, toast, journalEntries]);
+
+  const handleSetEditingEntry = useCallback((entry: JournalEntry) => {
+    setEditingEntry(entry);
+    window.scrollTo({ top: journalFormRef.current ? (journalFormRef.current as any).offsetTop - 20 : 0, behavior: 'smooth' });
+  }, []);
+
+  const handleCancelEdit = useCallback(() => {
+    setEditingEntry(null);
+    journalFormRef.current?.resetForm();
+  }, []);
+
 
   const handleExportCSV = () => {
     if (journalEntries.length === 0 && accountName === 'Demo Account' && initialBalance === 10000) {
@@ -138,13 +154,14 @@ export default function TradingJournalPage() {
             if (importedData) {
               setAccountName(importedData.accountName);
               setInitialBalance(importedData.initialBalance);
-              // Ensure imported entries have unique IDs if they are missing
               const entriesWithIds = importedData.entries.map(entry => ({
                 ...entry,
-                id: entry.id || nanoid(), // Assign new ID if missing
+                id: entry.id || nanoid(), 
               }));
-              setJournalEntries(entriesWithIds as JournalEntry[]); // Cast needed after adding ID
+              setJournalEntries(entriesWithIds as JournalEntry[]);
               toast({ title: "Import Successful", description: "Journal data loaded from CSV." });
+              setEditingEntry(null); // Clear any editing state
+              journalFormRef.current?.resetForm();
             } else {
               toast({ title: "Import Failed", description: "Could not parse CSV file. Please check format.", variant: "destructive" });
             }
@@ -167,7 +184,6 @@ export default function TradingJournalPage() {
     }
   };
 
-  // If you want a loading screen for file processing (isPending covers transitions)
   if (isProcessingFile && !isPending) { 
     return (
       <div className="container mx-auto p-4 md:p-8 font-body flex flex-col items-center justify-center min-h-screen">
@@ -232,8 +248,14 @@ export default function TradingJournalPage() {
       
       <Separator className="my-12" />
 
-      <section className="mb-12">
-        <JournalEntryForm onSubmit={handleAddEntry} accountBalanceAtFormInit={accountBalanceForNewEntry} disabled={isPending || isProcessingFile} />
+      <section className="mb-12" ref={journalFormRef as any}>
+        <JournalEntryForm 
+          onSave={handleSaveEntry} 
+          accountBalanceAtFormInit={editingEntry ? editingEntry.accountBalanceAtEntry : accountBalanceForNewEntry} 
+          disabled={isPending || isProcessingFile}
+          entryToEdit={editingEntry}
+          onCancelEdit={handleCancelEdit}
+        />
       </section>
       
       <Separator className="my-12" />
@@ -251,7 +273,7 @@ export default function TradingJournalPage() {
             </Button>
           </div>
         </div>
-        <JournalTable entries={journalEntries} />
+        <JournalTable entries={journalEntries} onEdit={handleSetEditingEntry} />
       </section>
 
       <footer className="mt-16 text-center text-muted-foreground text-sm">
@@ -260,3 +282,4 @@ export default function TradingJournalPage() {
     </div>
   );
 }
+    
