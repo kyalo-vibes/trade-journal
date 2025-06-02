@@ -16,7 +16,7 @@ import { Separator } from '@/components/ui/separator';
 import { nanoid } from 'nanoid';
 
 const calculateRRR = (direction?: JournalEntry['direction'], entryPrice?: number, slPrice?: number, tpPrice?: number): string => {
-  if (!direction || direction === 'No Trade' || entryPrice === undefined || slPrice === undefined || tpPrice === undefined) return "N/A";
+  if (!direction || !['Long', 'Short'].includes(direction) || entryPrice === undefined || slPrice === undefined || tpPrice === undefined) return "N/A";
   
   const entry = Number(entryPrice);
   const sl = Number(slPrice);
@@ -66,14 +66,15 @@ export default function TradingJournalPage() {
   const journalFormComponentRef = useRef<{ resetForm: () => void }>(null);
   const formSectionRef = useRef<HTMLElement>(null);
 
+  const areAccountDetailsLocked = journalEntries.length > 0;
+
   useEffect(() => {
     const calculatedTotalPL = journalEntries.reduce((sum, entry) => sum + (entry.pl || 0), 0);
     setTotalPL(calculatedTotalPL);
 
     const newCurrentBalance = initialBalance + calculatedTotalPL;
     setCurrentBalance(newCurrentBalance);
-
-    setAccountBalanceForNewEntry(newCurrentBalance);
+    setAccountBalanceForNewEntry(newCurrentBalance); // Update for new entries
 
     const actualTrades = journalEntries.filter(entry => entry.direction === 'Long' || entry.direction === 'Short');
     setNumberOfActualTrades(actualTrades.length);
@@ -82,8 +83,7 @@ export default function TradingJournalPage() {
       setAccountPercentageChange((calculatedTotalPL / initialBalance) * 100);
     } else if (calculatedTotalPL > 0) {
       setAccountPercentageChange(100); 
-    }
-     else {
+    } else {
       setAccountPercentageChange(0);
     }
 
@@ -98,11 +98,15 @@ export default function TradingJournalPage() {
 
 
   const handleAccountNameChange = (newName: string) => {
-    setAccountName(newName); 
+    if (!areAccountDetailsLocked) {
+      setAccountName(newName); 
+    }
   };
 
   const handleInitialBalanceChange = (newBalance: number) => {
-    setInitialBalance(newBalance);
+     if (!areAccountDetailsLocked) {
+      setInitialBalance(newBalance);
+    }
   };
 
   const handleSaveEntry = useCallback((entryData: Omit<JournalEntry, 'id' | 'accountBalanceAtEntry' | 'rrr'> | JournalEntry) => {
@@ -111,18 +115,18 @@ export default function TradingJournalPage() {
         const rrr = calculateRRR(entryData.direction, entryData.entryPrice, entryData.slPrice, entryData.tpPrice);
         const updatedEntry = { ...entryData, rrr };
         setJournalEntries(prevEntries => prevEntries.map(e => e.id === updatedEntry.id ? updatedEntry : e).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime() || a.time.localeCompare(b.time)));
-        toast({ title: "Entry Updated", description: `Trade for ${updatedEntry.market} has been updated.` });
+        toast({ title: "Entry Updated", description: `${updatedEntry.market} entry has been updated.` });
         setEditingEntry(null); 
       } else { 
         const rrr = calculateRRR(entryData.direction, entryData.entryPrice, entryData.slPrice, entryData.tpPrice);
         const newEntry: JournalEntry = {
           id: nanoid(), 
           ...entryData,
-          accountBalanceAtEntry: accountBalanceForNewEntry, // Use current balance for new entries
+          accountBalanceAtEntry: accountBalanceForNewEntry,
           rrr: rrr,
-        } as JournalEntry; // Cast to ensure all required fields are there
+        } as JournalEntry; 
         setJournalEntries(prevEntries => [...prevEntries, newEntry].sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime() || a.time.localeCompare(b.time)));
-        toast({ title: "Entry Added", description: `Trade for ${newEntry.market} logged.` });
+        toast({ title: "Entry Added", description: `${newEntry.market} entry logged.` });
       }
       journalFormComponentRef.current?.resetForm();
     });
@@ -230,7 +234,7 @@ export default function TradingJournalPage() {
       <Card className="mb-8 bg-card border-border shadow-xl">
         <CardHeader>
           <CardTitle className="font-headline text-2xl flex items-center"><DollarSign className="mr-2 h-6 w-6 text-primary" />Account Overview</CardTitle>
-          <CardDescription>Manage your account details. Changes are saved when you export to CSV.</CardDescription>
+          <CardDescription>Manage your account details. {areAccountDetailsLocked ? "Account Name and Initial Balance are locked after the first entry." : "Changes are saved when you export to CSV."}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
@@ -242,7 +246,8 @@ export default function TradingJournalPage() {
                       value={accountName}
                       onChange={(e) => handleAccountNameChange(e.target.value)} 
                       className="mt-1 bg-muted border-border focus:ring-primary font-headline text-lg"
-                      disabled={isPending || isProcessingFile}
+                      disabled={isPending || isProcessingFile || areAccountDetailsLocked}
+                      title={areAccountDetailsLocked ? "Account Name is locked after entries are added." : "Enter account name"}
                   />
                 </div>
                 <div>
@@ -253,7 +258,8 @@ export default function TradingJournalPage() {
                       value={initialBalance}
                       onChange={(e) => handleInitialBalanceChange(parseFloat(e.target.value) || 0)}
                       className="mt-1 bg-muted border-border focus:ring-primary text-lg"
-                      disabled={isPending || isProcessingFile}
+                      disabled={isPending || isProcessingFile || areAccountDetailsLocked}
+                      title={areAccountDetailsLocked ? "Initial Balance is locked after entries are added." : "Enter initial account balance"}
                   />
                 </div>
                 <div>
@@ -266,7 +272,7 @@ export default function TradingJournalPage() {
             <Separator className="my-4"/>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
               <div className="bg-muted p-3 rounded-md">
-                <Label className="font-headline text-xs text-muted-foreground flex items-center"><Hash className="mr-1 h-3 w-3"/>Total Trades</Label>
+                <Label className="font-headline text-xs text-muted-foreground flex items-center"><Hash className="mr-1 h-3 w-3"/>Total Actual Trades</Label>
                 <p className="font-bold text-lg font-headline">{numberOfActualTrades}</p>
               </div>
               <div className="bg-muted p-3 rounded-md">
@@ -331,4 +337,3 @@ export default function TradingJournalPage() {
     </div>
   );
 }
-    

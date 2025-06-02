@@ -4,7 +4,7 @@ import type { JournalEntry, JournalData, TradeDirection } from './types';
 
 // Consistent column order for CSV reliability
 const CSV_COLUMN_ORDER: (keyof JournalEntry | 'accountName' | 'initialBalance' | 'tradeNumber')[] = [
-  'tradeNumber', // Added Trade Number
+  'tradeNumber', 
   'accountName', 
   'initialBalance',
   'id', 
@@ -19,7 +19,7 @@ const CSV_COLUMN_ORDER: (keyof JournalEntry | 'accountName' | 'initialBalance' |
   'tpPrice', 
   'actualExitPrice', 
   'rrr', 
-  'pl', 
+  'pl', // This is Amount for Withdrawal/Deposit
   'screenshot', 
   'notes', 
   'disciplineRating', 
@@ -45,13 +45,25 @@ export function exportJournalDataToCSV(data: JournalData): void {
   
   const rows = entries.map((entry, index) => {
     const entryDataForCSV: Record<string, any> = {
-      tradeNumber: index + 1, // Generate trade number
+      tradeNumber: index + 1,
       accountName, 
       initialBalance, 
       ...entry,
       date: entry.date instanceof Date && isValid(entry.date) ? format(entry.date, 'yyyy-MM-dd') : String(entry.date),
       screenshot: entry.screenshot && entry.screenshot.startsWith('data:image') ? 'has_screenshot_base64' : (entry.screenshot || ''),
     };
+    // Ensure fields not applicable to Withdrawal/Deposit are blank
+    if (entry.direction === 'Withdrawal' || entry.direction === 'Deposit') {
+        entryDataForCSV.entryPrice = '';
+        entryDataForCSV.positionSize = '';
+        entryDataForCSV.slPrice = '';
+        entryDataForCSV.tpPrice = '';
+        entryDataForCSV.actualExitPrice = '';
+        entryDataForCSV.rrr = '';
+        // entryDataForCSV.disciplineRating = ''; // Keep discipline rating or make it N/A if desired
+        entryDataForCSV.reasonForExit = '';
+    }
+
     return CSV_COLUMN_ORDER.map(header => serializeCSVValue(entryDataForCSV[header])).join(',');
   });
 
@@ -145,10 +157,11 @@ export function importJournalDataFromCSV(csvString: string): JournalData | null 
 
       (Object.keys(colIndices) as Array<keyof typeof colIndices>).forEach(key => {
         const index = colIndices[key]!;
-        if (index === undefined) return; // Skip if column not found in this CSV
+        if (index === undefined || values[index] === undefined) return; // Skip if column not found or value is undefined
+        
         const value = values[index];
 
-        if (value === '' || value === 'N/A' || value === undefined || value === null) {
+        if (value === '' || value === 'N/A' || value === null) {
           (entry as any)[key] = undefined;
           return;
         }
@@ -157,7 +170,7 @@ export function importJournalDataFromCSV(csvString: string): JournalData | null 
           case 'id': entry.id = value; break;
           case 'date': 
             const parsedDate = parseISO(value);
-            entry.date = isValid(parsedDate) ? parsedDate : new Date();
+            entry.date = isValid(parsedDate) ? parsedDate : new Date(); // Default to today if invalid
             if (!isValid(parsedDate)) console.warn(`Invalid date format for row: ${value}. Using current date.`);
             break;
           case 'time': entry.time = value; break;
@@ -169,13 +182,13 @@ export function importJournalDataFromCSV(csvString: string): JournalData | null 
           case 'slPrice': 
           case 'tpPrice': 
           case 'actualExitPrice': 
-          case 'pl':
+          case 'pl': // This is amount for Withdrawal/Deposit
             const numVal = parseFloat(value);
             (entry as any)[key] = isNaN(numVal) ? undefined : numVal;
             break;
           case 'disciplineRating':
             const rating = parseInt(value, 10);
-            entry.disciplineRating = (rating >= 1 && rating <= 5) ? rating as 1 | 2 | 3 | 4 | 5 : 3;
+            entry.disciplineRating = (rating >= 1 && rating <= 5) ? rating as 1 | 2 | 3 | 4 | 5 : 3; // Default to 3 if invalid
             break;
           case 'rrr': entry.rrr = value; break;
           case 'screenshot':
@@ -188,17 +201,20 @@ export function importJournalDataFromCSV(csvString: string): JournalData | null 
           case 'reasonForExit': entry.reasonForExit = value; break;
           case 'accountName': break; 
           case 'initialBalance': break;
-          case 'tradeNumber': break; // Trade number is informational in CSV, not stored in JournalEntry state
+          case 'tradeNumber': break; 
           default:
-            // This ensures that if a key from CSV_COLUMN_ORDER is not explicitly handled,
-            // it doesn't cause an error, but also doesn't get assigned to entry if not a valid JournalEntry prop.
-            // const _exhaustiveCheck: never = key; // For type checking, if all JournalEntry keys were handled
             break;
         }
       });
       
-      if (entry.date && entry.time && entry.direction && entry.market && entry.accountBalanceAtEntry !== undefined && entry.disciplineRating) {
-         importedEntries.push(entry as Omit<JournalEntry, 'id'>); 
+      // Basic validation for a usable entry
+      if (entry.date && entry.time && entry.direction && entry.market && entry.accountBalanceAtEntry !== undefined && entry.disciplineRating !== undefined) {
+         // For withdrawals/deposits, P/L (amount) is crucial
+         if ((entry.direction === 'Withdrawal' || entry.direction === 'Deposit') && entry.pl === undefined) {
+            console.warn("Skipping Withdrawal/Deposit row due to missing amount (P/L field). Parsed data:", entry, "Original line:", line);
+         } else {
+            importedEntries.push(entry as Omit<JournalEntry, 'id'>); 
+         }
       } else {
         console.warn("Skipping row due to missing required fields or parse errors. Parsed data:", entry, "Original line:", line);
       }
@@ -215,4 +231,3 @@ export function importJournalDataFromCSV(csvString: string): JournalData | null 
     return null;
   }
 }
-
