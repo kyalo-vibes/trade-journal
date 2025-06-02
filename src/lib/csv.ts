@@ -39,7 +39,7 @@ const serializeCSVValue = (value: any): string => {
   return stringValue;
 };
 
-export function exportJournalDataToCSV(data: JournalData): void {
+export async function exportJournalDataToCSV(data: JournalData): Promise<{success: boolean, message: string}> {
   const { accountName, initialBalance, entries } = data;
 
   const headerString = CSV_COLUMN_ORDER.join(',');
@@ -51,7 +51,6 @@ export function exportJournalDataToCSV(data: JournalData): void {
       initialBalance, 
       ...entry,
       date: entry.date instanceof Date && isValid(entry.date) ? format(entry.date, 'yyyy-MM-dd') : String(entry.date),
-      // Store the full Base64 data URI for the screenshot if it exists
       screenshot: entry.screenshot || '', 
     };
     
@@ -69,19 +68,51 @@ export function exportJournalDataToCSV(data: JournalData): void {
   });
 
   const csvContent = [headerString, ...rows].join('\n');
-  
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const link = document.createElement('a');
-  if (link.download !== undefined) {
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    const filenameSafeAccountName = accountName.replace(/[^a-z0-9]/gi, '_').toLowerCase() || 'journal';
-    link.setAttribute('download', `${filenameSafeAccountName}_journal.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+  const filenameSafeAccountName = accountName.replace(/[^a-z0-9]/gi, '_').toLowerCase() || 'journal';
+  const suggestedFilename = `${filenameSafeAccountName}_journal.csv`;
+
+  if (typeof window !== 'undefined' && 'showSaveFilePicker' in window) {
+    try {
+      const handle = await (window as any).showSaveFilePicker({
+        suggestedName: suggestedFilename,
+        types: [{
+          description: 'CSV Files',
+          accept: { 'text/csv': ['.csv'] },
+        }],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      return { success: true, message: "Export Successful." };
+    } catch (err: any) {
+      // Handle errors, e.g., user cancelling the dialog
+      if (err.name === 'AbortError') {
+        return { success: false, message: "Export cancelled by user." };
+      }
+      console.error("Error using showSaveFilePicker:", err);
+      return { success: false, message: `Export failed: ${err.message}` };
+    }
+  } else {
+    // Fallback for browsers that don't support showSaveFilePicker
+    try {
+        const link = document.createElement('a');
+        if (link.download !== undefined) {
+            const url = URL.createObjectURL(blob);
+            link.setAttribute('href', url);
+            link.setAttribute('download', suggestedFilename);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            return { success: true, message: "Export Successful (fallback method)." };
+        }
+        return { success: false, message: "Export failed: Browser does not support download links." };
+    } catch (error: any) {
+        console.error("Error during fallback export:", error);
+        return { success: false, message: `Export failed (fallback method): ${error.message}`};
+    }
   }
 }
 
@@ -154,7 +185,7 @@ export function importJournalDataFromCSV(csvString: string): JournalData | null 
         continue;
       }
 
-      const entry: Partial<JournalEntry> & { id?: string } = {}; // Allow id to be undefined initially
+      const entry: Partial<JournalEntry> & { id?: string } = {}; 
 
       (Object.keys(colIndices) as Array<keyof typeof colIndices>).forEach(key => {
         const index = colIndices[key]!;
@@ -193,8 +224,7 @@ export function importJournalDataFromCSV(csvString: string): JournalData | null 
             break;
           case 'rrr': entry.rrr = value; break;
           case 'screenshot':
-            // Directly use the value from CSV, assuming it's a Base64 string or empty
-            entry.screenshot = value || undefined; 
+            entry.screenshot = value.startsWith('data:image') ? value : undefined; 
             break;
           case 'notes': entry.notes = value; break;
           case 'emotionalState': entry.emotionalState = value; break;
@@ -210,7 +240,7 @@ export function importJournalDataFromCSV(csvString: string): JournalData | null 
       });
       
       if (!entry.id) {
-        entry.id = nanoid(); // Assign a new ID if one wasn't found in the CSV
+        entry.id = nanoid(); 
       }
 
       if (entry.date && entry.time && entry.direction && entry.market && entry.accountBalanceAtEntry !== undefined && entry.disciplineRating !== undefined && entry.id) {
@@ -235,4 +265,3 @@ export function importJournalDataFromCSV(csvString: string): JournalData | null 
     return null;
   }
 }
-

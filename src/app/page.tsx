@@ -11,10 +11,9 @@ import { Button } from '@/components/ui/button';
 import { exportJournalDataToCSV, importJournalDataFromCSV } from '@/lib/csv';
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Download, UploadCloud, DollarSign, ListChecks, Loader2, TrendingUp, TrendingDown, Percent, Hash, Landmark } from 'lucide-react';
+import { Download, UploadCloud, DollarSign, ListChecks, Loader2, TrendingUp, TrendingDown, Hash, Landmark } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { nanoid } from 'nanoid';
-// import { format } from 'date-fns'; // No longer directly used here, but used in subcomponents
 
 const calculateRRR = (direction?: JournalEntry['direction'], entryPrice?: number, slPrice?: number, tpPrice?: number): string => {
   if (!direction || !['Long', 'Short'].includes(direction) || entryPrice === undefined || slPrice === undefined || tpPrice === undefined) return "N/A";
@@ -57,10 +56,10 @@ export default function TradingJournalPage() {
   const [isPending, startTransition] = useTransition();
 
   // Stats
-  const [tradePL, setTradePL] = useState<number>(0); // P/L from Long/Short trades only
-  const [netAccountMovement, setNetAccountMovement] = useState<number>(0); // Total change including deposits/withdrawals
+  const [tradePL, setTradePL] = useState<number>(0); 
+  const [netAccountMovement, setNetAccountMovement] = useState<number>(0); 
   const [numberOfActualTrades, setNumberOfActualTrades] = useState<number>(0);
-  const [accountPercentageChange, setAccountPercentageChange] = useState<number>(0); // Based on netAccountMovement
+  const [accountPercentageChange, setAccountPercentageChange] = useState<number>(0); 
   const [winRate, setWinRate] = useState<number>(0);
   const [averageWinTrade, setAverageWinTrade] = useState<number>(0);
 
@@ -138,14 +137,13 @@ export default function TradingJournalPage() {
         const newEntry: JournalEntry = {
           id: nanoid(), 
           ...entryData,
-          date: entryData.date instanceof Date ? entryData.date : new Date(entryData.date), // Ensure it's a Date object
+          date: entryData.date instanceof Date ? entryData.date : new Date(entryData.date), 
           accountBalanceAtEntry: accountBalanceForNewEntry,
           rrr: rrr,
         } as JournalEntry; 
         newEntries = [...journalEntries, newEntry];
         toast({ title: "Entry Added", description: `${newEntry.market} entry logged.` });
       }
-      // Sort entries by date and then by time
       newEntries.sort((a, b) => {
         const dateA = a.date instanceof Date ? a.date : new Date(a.date);
         const dateB = b.date instanceof Date ? b.date : new Date(b.date);
@@ -171,23 +169,26 @@ export default function TradingJournalPage() {
   }, []);
 
 
-  const handleExportCSV = () => {
+  const handleExportCSV = async () => {
     if (journalEntries.length === 0 && accountName === 'Default Account' && initialBalance === 10000) {
       toast({ title: "Export Skipped", description: "No custom data to export.", variant: "default" });
       return;
     }
     setIsProcessingFile(true);
-    startTransition(() => {
-      try {
-        exportJournalDataToCSV({ accountName, initialBalance, entries: journalEntries });
-        toast({ title: "Export Successful", description: "Journal data exported to CSV." });
-      } catch (error) {
-        console.error("Error exporting CSV:", error);
-        toast({ title: "Export Failed", description: "Could not generate CSV file.", variant: "destructive" });
-      } finally {
-        setIsProcessingFile(false);
+    // No transition needed here if exportJournalDataToCSV is async and handles its own UI updates
+    try {
+      const result = await exportJournalDataToCSV({ accountName, initialBalance, entries: journalEntries });
+      if (result.success) {
+        toast({ title: "Export Successful", description: result.message });
+      } else {
+        toast({ title: "Export Note", description: result.message, variant: result.message.includes("cancelled") ? "default" : "destructive" });
       }
-    });
+    } catch (error) {
+      console.error("Error exporting CSV:", error);
+      toast({ title: "Export Failed", description: "Could not generate CSV file.", variant: "destructive" });
+    } finally {
+      setIsProcessingFile(false);
+    }
   };
 
   const handleImportCSV = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -207,7 +208,7 @@ export default function TradingJournalPage() {
               const entriesWithIdsAndDateObjects = importedData.entries.map(entry => ({
                 ...entry,
                 id: entry.id || nanoid(), 
-                date: entry.date instanceof Date ? entry.date : new Date(entry.date) // Ensure date is a Date object
+                date: entry.date instanceof Date ? entry.date : new Date(entry.date) 
               })).sort((a,b) => {
                 const dateA = a.date instanceof Date ? a.date : new Date(a.date);
                 const dateB = b.date instanceof Date ? b.date : new Date(b.date);
@@ -384,5 +385,3 @@ export default function TradingJournalPage() {
     </div>
   );
 }
-
-    
