@@ -3,7 +3,8 @@ import { format, parseISO, isValid } from 'date-fns';
 import type { JournalEntry, JournalData, TradeDirection } from './types';
 
 // Consistent column order for CSV reliability
-const CSV_COLUMN_ORDER: (keyof JournalEntry | 'accountName' | 'initialBalance')[] = [
+const CSV_COLUMN_ORDER: (keyof JournalEntry | 'accountName' | 'initialBalance' | 'tradeNumber')[] = [
+  'tradeNumber', // Added Trade Number
   'accountName', 
   'initialBalance',
   'id', 
@@ -42,8 +43,9 @@ export function exportJournalDataToCSV(data: JournalData): void {
 
   const headerString = CSV_COLUMN_ORDER.join(',');
   
-  const rows = entries.map(entry => {
+  const rows = entries.map((entry, index) => {
     const entryDataForCSV: Record<string, any> = {
+      tradeNumber: index + 1, // Generate trade number
       accountName, 
       initialBalance, 
       ...entry,
@@ -101,9 +103,9 @@ export function importJournalDataFromCSV(csvString: string): JournalData | null 
     if (lines.length < 1) return null; 
 
     const headerLine = lines[0];
-    const headers = parseCSVRow(headerLine).map(h => h.replace(/^"|"$/g, '').trim() as keyof JournalEntry | 'accountName' | 'initialBalance');
+    const headers = parseCSVRow(headerLine).map(h => h.replace(/^"|"$/g, '').trim() as keyof JournalEntry | 'accountName' | 'initialBalance' | 'tradeNumber');
     
-    const colIndices: Partial<Record<keyof JournalEntry | 'accountName' | 'initialBalance', number>> = {};
+    const colIndices: Partial<Record<keyof JournalEntry | 'accountName' | 'initialBalance' | 'tradeNumber', number>> = {};
     CSV_COLUMN_ORDER.forEach(colName => {
         const index = headers.indexOf(colName);
         if (index !== -1) {
@@ -111,12 +113,10 @@ export function importJournalDataFromCSV(csvString: string): JournalData | null 
         }
     });
 
-    // Default values, will be overridden by CSV if present
     let accountName = "Imported Account"; 
     let initialBalance = 0; 
     const importedEntries: Omit<JournalEntry, 'id'>[] = []; 
 
-    // Account Name and Initial Balance are expected to be consistent or taken from the first data row
     if (lines.length > 1) {
         const firstDataRowValues = parseCSVRow(lines[1]);
         if (colIndices.accountName !== undefined && firstDataRowValues[colIndices.accountName!] !== undefined) {
@@ -133,18 +133,19 @@ export function importJournalDataFromCSV(csvString: string): JournalData | null 
 
     for (const line of dataRows) {
       const values = parseCSVRow(line);
-      if (values.length < headers.length && values.every(v => v === '')) { // Skip completely empty parsed rows
+      if (values.length < headers.length && values.every(v => v === '')) { 
           continue;
       }
-      if (values.length < headers.length && values.length < CSV_COLUMN_ORDER.filter(c => colIndices[c] !== undefined).length / 2 ) { // Heuristic for malformed row
-        console.warn(`Skipping malformed row: Expected at least ${headers.length} values, got ${values.length}. Row: ${line}`);
+      if (values.length < CSV_COLUMN_ORDER.filter(c => colIndices[c] !== undefined).length * 0.5 ) { 
+        console.warn(`Skipping malformed row: Expected relevant columns, got too few. Row: ${line}`);
         continue;
       }
 
-      const entry: Partial<JournalEntry> = {}; // ID will be handled later if needed
+      const entry: Partial<JournalEntry> = {};
 
       (Object.keys(colIndices) as Array<keyof typeof colIndices>).forEach(key => {
         const index = colIndices[key]!;
+        if (index === undefined) return; // Skip if column not found in this CSV
         const value = values[index];
 
         if (value === '' || value === 'N/A' || value === undefined || value === null) {
@@ -153,15 +154,11 @@ export function importJournalDataFromCSV(csvString: string): JournalData | null 
         }
         
         switch (key) {
-          case 'id': entry.id = value; break; // Keep ID if present
+          case 'id': entry.id = value; break;
           case 'date': 
             const parsedDate = parseISO(value);
-            if (isValid(parsedDate)) {
-                 entry.date = parsedDate;
-            } else {
-                entry.date = new Date(); 
-                console.warn(`Invalid date format for row: ${value}. Using current date.`);
-            }
+            entry.date = isValid(parsedDate) ? parsedDate : new Date();
+            if (!isValid(parsedDate)) console.warn(`Invalid date format for row: ${value}. Using current date.`);
             break;
           case 'time': entry.time = value; break;
           case 'direction': entry.direction = value as TradeDirection; break;
@@ -178,8 +175,7 @@ export function importJournalDataFromCSV(csvString: string): JournalData | null 
             break;
           case 'disciplineRating':
             const rating = parseInt(value, 10);
-            if (rating >= 1 && rating <= 5) entry.disciplineRating = rating as 1 | 2 | 3 | 4 | 5;
-            else entry.disciplineRating = 3; 
+            entry.disciplineRating = (rating >= 1 && rating <= 5) ? rating as 1 | 2 | 3 | 4 | 5 : 3;
             break;
           case 'rrr': entry.rrr = value; break;
           case 'screenshot':
@@ -192,13 +188,16 @@ export function importJournalDataFromCSV(csvString: string): JournalData | null 
           case 'reasonForExit': entry.reasonForExit = value; break;
           case 'accountName': break; 
           case 'initialBalance': break;
+          case 'tradeNumber': break; // Trade number is informational in CSV, not stored in JournalEntry state
           default:
+            // This ensures that if a key from CSV_COLUMN_ORDER is not explicitly handled,
+            // it doesn't cause an error, but also doesn't get assigned to entry if not a valid JournalEntry prop.
+            // const _exhaustiveCheck: never = key; // For type checking, if all JournalEntry keys were handled
             break;
         }
       });
       
       if (entry.date && entry.time && entry.direction && entry.market && entry.accountBalanceAtEntry !== undefined && entry.disciplineRating) {
-         // ID is handled by caller if needed (e.g. nanoid if entry.id is undefined)
          importedEntries.push(entry as Omit<JournalEntry, 'id'>); 
       } else {
         console.warn("Skipping row due to missing required fields or parse errors. Parsed data:", entry, "Original line:", line);
@@ -216,3 +215,4 @@ export function importJournalDataFromCSV(csvString: string): JournalData | null 
     return null;
   }
 }
+

@@ -15,7 +15,7 @@ import type { JournalEntry } from '@/lib/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { format } from 'date-fns';
-import { TrendingUp, TrendingDown, Ban, ExternalLink, Edit, Clock } from 'lucide-react';
+import { TrendingUp, TrendingDown, Ban, ExternalLink, Edit, Clock, Hash } from 'lucide-react';
 import { cn } from "@/lib/utils"
 
 
@@ -33,7 +33,7 @@ const DirectionIcon = ({ direction }: { direction: JournalEntry['direction'] }) 
 
 export function JournalTable({ entries, onEdit }: JournalTableProps) {
   if (entries.length === 0) {
-    return <p className="text-center text-muted-foreground py-8">No journal entries yet. Add one using the form above!</p>;
+    return <p className="text-center text-muted-foreground py-8">No journal entries yet. Add one using the form or import a CSV!</p>;
   }
 
   return (
@@ -42,6 +42,7 @@ export function JournalTable({ entries, onEdit }: JournalTableProps) {
         <TableHeader className="bg-muted/50">
           <TableRow>
             <TableHead className="font-headline text-foreground sticky left-0 bg-muted/50 z-10 w-[100px] px-2 py-3">Actions</TableHead>
+            <TableHead className="font-headline text-foreground px-3 py-3 w-[80px]">Trade #</TableHead>
             <TableHead className="font-headline text-foreground px-3 py-3">Date</TableHead>
             <TableHead className="font-headline text-foreground px-3 py-3">Time</TableHead>
             <TableHead className="font-headline text-foreground px-3 py-3">Direction</TableHead>
@@ -64,13 +65,14 @@ export function JournalTable({ entries, onEdit }: JournalTableProps) {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {entries.map((entry) => (
-            <TableRow key={entry.id} className="hover:bg-muted/80">
+          {entries.map((entry, index) => (
+            <TableRow key={entry.id} className="hover:bg-muted/80 group">
               <TableCell className="sticky left-0 bg-card group-hover:bg-muted/80 z-10 px-2 py-2">
                 <Button variant="outline" size="sm" onClick={() => onEdit(entry)} className="font-headline h-8">
                   <Edit className="mr-1.5 h-3.5 w-3.5" /> Edit
                 </Button>
               </TableCell>
+              <TableCell className="px-3 py-2 text-center">{index + 1}</TableCell>
               <TableCell className="px-3 py-2">{entry.date instanceof Date ? format(entry.date, 'yyyy-MM-dd') : String(entry.date)}</TableCell>
               <TableCell className="px-3 py-2">{entry.time}</TableCell>
               <TableCell className="px-3 py-2">
@@ -133,3 +135,4 @@ export function JournalTable({ entries, onEdit }: JournalTableProps) {
   );
 }
     
+
