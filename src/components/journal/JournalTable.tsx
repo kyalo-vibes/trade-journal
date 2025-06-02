@@ -15,18 +15,18 @@ import type { JournalEntry } from '@/lib/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { format } from 'date-fns';
-import { TrendingUp, TrendingDown, Ban, ExternalLink, Edit, Clock, Landmark, Image as ImageIcon } from 'lucide-react';
+import { TrendingUp, TrendingDown, Ban, Edit, Clock, Landmark, Image as ImageIcon } from 'lucide-react'; // Removed ExternalLink as it's not used
 import { cn } from "@/lib/utils"
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
   DialogClose,
   DialogDescription,
+  // DialogTrigger, // No longer needed here
 } from "@/components/ui/dialog"
-import Image from 'next/image'; // Using next/image for optimized images if applicable
+import Image from 'next/image';
 
 interface JournalTableProps {
   entries: JournalEntry[];
@@ -139,11 +139,9 @@ export function JournalTable({ entries, onEdit }: JournalTableProps) {
                 <TableCell className="text-right px-3 py-2">{entry.accountBalanceAtEntry.toFixed(2)}</TableCell>
                 <TableCell className="px-3 py-2">
                   {entry.screenshot && entry.screenshot.startsWith('data:image') ? (
-                     <DialogTrigger asChild>
-                        <Button variant="ghost" size="sm" onClick={() => setSelectedImage(entry.screenshot!)} className="text-primary hover:underline flex items-center text-sm p-1 h-auto">
-                            View <ImageIcon className="ml-1 h-3.5 w-3.5" />
-                        </Button>
-                    </DialogTrigger>
+                    <Button variant="ghost" size="sm" onClick={() => setSelectedImage(entry.screenshot!)} className="text-primary hover:underline flex items-center text-sm p-1 h-auto">
+                        View <ImageIcon className="ml-1 h-3.5 w-3.5" />
+                    </Button>
                   ) : entry.screenshot ? (
                     <span className="text-muted-foreground italic text-xs">Ref: {entry.screenshot}</span>
                   ) : (
@@ -177,8 +175,8 @@ export function JournalTable({ entries, onEdit }: JournalTableProps) {
               <Image 
                 src={selectedImage} 
                 alt="Journal Entry Screenshot" 
-                width={1200} // Max width, will scale down
-                height={800} // Max height, will scale down
+                width={1200} 
+                height={800} 
                 style={{ objectFit: 'contain', maxHeight: '70vh', width: 'auto' }}
                 className="rounded-md border"
                 data-ai-hint="chart graph document"
@@ -197,4 +195,3 @@ export function JournalTable({ entries, onEdit }: JournalTableProps) {
     </>
   );
 }
-
