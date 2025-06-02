@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { exportJournalDataToCSV, importJournalDataFromCSV } from '@/lib/csv';
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Download, UploadCloud, DollarSign, ListChecks, Loader2, TrendingUp, TrendingDown, Percent, Hash, Landmark } from 'lucide-react';
+import { Download, UploadCloud, DollarSign, ListChecks, Loader2, TrendingUp, TrendingDown, Percent, Hash, Landmark, PlusCircle, MinusCircle } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { nanoid } from 'nanoid';
 import { format } from 'date-fns';
@@ -62,6 +62,7 @@ export default function TradingJournalPage() {
   const [numberOfActualTrades, setNumberOfActualTrades] = useState<number>(0);
   const [accountPercentageChange, setAccountPercentageChange] = useState<number>(0); // Based on netAccountMovement
   const [winRate, setWinRate] = useState<number>(0);
+  const [averageWinTrade, setAverageWinTrade] = useState<number>(0);
 
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -95,10 +96,17 @@ export default function TradingJournalPage() {
     }
 
     if (actualTrades.length > 0) {
-      const winningTrades = actualTrades.filter(entry => (entry.pl || 0) > 0).length;
-      setWinRate((winningTrades / actualTrades.length) * 100);
+      const winningTrades = actualTrades.filter(entry => (entry.pl || 0) > 0);
+      setWinRate((winningTrades.length / actualTrades.length) * 100);
+      if (winningTrades.length > 0) {
+        const totalWinPL = winningTrades.reduce((sum, entry) => sum + (entry.pl || 0), 0);
+        setAverageWinTrade(totalWinPL / winningTrades.length);
+      } else {
+        setAverageWinTrade(0);
+      }
     } else {
       setWinRate(0);
+      setAverageWinTrade(0);
     }
 
   }, [initialBalance, journalEntries]);
@@ -295,7 +303,7 @@ export default function TradingJournalPage() {
                 </div>
             </div>
             <Separator className="my-4"/>
-            <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 text-sm">
               <div className="bg-muted p-3 rounded-md">
                 <Label className="font-headline text-xs text-muted-foreground flex items-center"><Hash className="mr-1 h-3 w-3"/>Total Actual Trades</Label>
                 <p className="font-bold text-lg font-headline">{numberOfActualTrades}</p>
@@ -327,6 +335,13 @@ export default function TradingJournalPage() {
                   Win Rate
                   </Label>
                 <p className={`font-bold text-lg font-headline ${winRate >= 0 ? 'text-positive' : 'text-negative'}`}>{winRate.toFixed(2)}%</p>
+              </div>
+               <div className="bg-muted p-3 rounded-md">
+                <Label className="font-headline text-xs text-muted-foreground flex items-center">
+                  <DollarSign className="mr-1 h-3 w-3 text-positive"/>
+                  Avg. Win Trade ($)
+                  </Label>
+                <p className={`font-bold text-lg font-headline text-positive`}>{averageWinTrade.toFixed(2)}</p>
               </div>
             </div>
         </CardContent>
@@ -369,3 +384,5 @@ export default function TradingJournalPage() {
     </div>
   );
 }
+
+    
