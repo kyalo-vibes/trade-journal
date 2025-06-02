@@ -11,10 +11,10 @@ import { Button } from '@/components/ui/button';
 import { exportJournalDataToCSV, importJournalDataFromCSV } from '@/lib/csv';
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Download, UploadCloud, DollarSign, ListChecks, Loader2, TrendingUp, TrendingDown, Percent, Hash, Landmark, PlusCircle, MinusCircle } from 'lucide-react';
+import { Download, UploadCloud, DollarSign, ListChecks, Loader2, TrendingUp, TrendingDown, Percent, Hash, Landmark } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { nanoid } from 'nanoid';
-import { format } from 'date-fns';
+// import { format } from 'date-fns'; // No longer directly used here, but used in subcomponents
 
 const calculateRRR = (direction?: JournalEntry['direction'], entryPrice?: number, slPrice?: number, tpPrice?: number): string => {
   if (!direction || !['Long', 'Short'].includes(direction) || entryPrice === undefined || slPrice === undefined || tpPrice === undefined) return "N/A";
@@ -303,7 +303,7 @@ export default function TradingJournalPage() {
                 </div>
             </div>
             <Separator className="my-4"/>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 text-sm">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-sm">
               <div className="bg-muted p-3 rounded-md">
                 <Label className="font-headline text-xs text-muted-foreground flex items-center"><Hash className="mr-1 h-3 w-3"/>Total Actual Trades</Label>
                 <p className="font-bold text-lg font-headline">{numberOfActualTrades}</p>

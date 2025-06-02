@@ -15,7 +15,7 @@ import type { JournalEntry } from '@/lib/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { format } from 'date-fns';
-import { TrendingUp, TrendingDown, Ban, Edit, Clock, Landmark, Image as ImageIcon } from 'lucide-react'; // Removed ExternalLink as it's not used
+import { TrendingUp, TrendingDown, Ban, Edit, Clock, Landmark, Image as ImageIcon, Download, ZoomIn, ZoomOut, MinusCircle, PlusCircle } from 'lucide-react';
 import { cn } from "@/lib/utils"
 import {
   Dialog,
@@ -24,9 +24,8 @@ import {
   DialogTitle,
   DialogClose,
   DialogDescription,
-  // DialogTrigger, // No longer needed here
 } from "@/components/ui/dialog"
-import Image from 'next/image';
+import NextImage from 'next/image'; // Renamed to avoid conflict with Lucide icon
 
 interface JournalTableProps {
   entries: JournalEntry[];
@@ -41,9 +40,38 @@ const DirectionIcon = ({ direction }: { direction: JournalEntry['direction'] }) 
   return <Ban className="h-4 w-4 text-muted-foreground" />;
 };
 
+const getExtensionFromMimeType = (dataUri: string): string => {
+  const mimeTypeMatch = dataUri.match(/^data:(image\/[^;]+);base64,/);
+  if (!mimeTypeMatch || !mimeTypeMatch[1]) return 'png'; // Default
+  const parts = mimeTypeMatch[1].split('/');
+  return parts[1] || 'png';
+};
+
 
 export function JournalTable({ entries, onEdit }: JournalTableProps) {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [zoomLevel, setZoomLevel] = useState<number>(1);
+
+  const handleDownloadImage = () => {
+    if (selectedImage) {
+      const link = document.createElement('a');
+      link.href = selectedImage;
+      const extension = getExtensionFromMimeType(selectedImage);
+      link.download = `screenshot.${extension}`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  };
+
+  const handleZoomIn = () => setZoomLevel(prev => Math.min(prev + 0.2, 3)); // Max zoom 3x
+  const handleZoomOut = () => setZoomLevel(prev => Math.max(prev - 0.2, 0.2)); // Min zoom 0.2x
+  
+  const closeDialog = () => {
+    setSelectedImage(null);
+    setZoomLevel(1); // Reset zoom when dialog closes
+  }
+
 
   if (entries.length === 0) {
     return <p className="text-center text-muted-foreground py-8">No journal entries yet. Add one using the form or import a CSV!</p>;
@@ -162,36 +190,61 @@ export function JournalTable({ entries, onEdit }: JournalTableProps) {
         {entries.length > 0 && <ScrollBar orientation="vertical" />}
       </ScrollArea>
 
-      <Dialog open={!!selectedImage} onOpenChange={(isOpen) => !isOpen && setSelectedImage(null)}>
-        <DialogContent className="sm:max-w-[80vw] md:max-w-[70vw] lg:max-w-[60vw] xl:max-w-[50vw] max-h-[90vh] overflow-y-auto p-4">
+      <Dialog open={!!selectedImage} onOpenChange={(isOpen) => !isOpen && closeDialog()}>
+        <DialogContent className="sm:max-w-[90vw] md:max-w-[80vw] lg:max-w-[70vw] xl:max-w-[60vw] max-h-[90vh] flex flex-col p-4">
           <DialogHeader>
             <DialogTitle>Screenshot Viewer</DialogTitle>
             <DialogDescription>
-              Viewing attached document/image.
+              Viewing attached document/image. Use controls to zoom or download.
             </DialogDescription>
           </DialogHeader>
           {selectedImage && (
-            <div className="mt-4 flex justify-center">
-              <Image 
+            <div className="flex-grow mt-4 overflow-auto rounded-md border bg-muted/30 flex items-center justify-center">
+              <NextImage 
                 src={selectedImage} 
                 alt="Journal Entry Screenshot" 
                 width={1200} 
                 height={800} 
-                style={{ objectFit: 'contain', maxHeight: '70vh', width: 'auto' }}
-                className="rounded-md border"
+                style={{ 
+                    objectFit: 'contain', 
+                    transform: `scale(${zoomLevel})`, 
+                    transformOrigin: 'center center',
+                    transition: 'transform 0.2s ease-out',
+                    maxWidth: '100%',
+                    maxHeight: '100%',
+                 }}
+                className="rounded-md"
                 data-ai-hint="chart graph document"
               />
             </div>
           )}
-          <div className="mt-4 flex justify-end">
-            <DialogClose asChild>
-              <Button type="button" variant="outline">
-                Close
-              </Button>
-            </DialogClose>
+          <div className="mt-4 flex flex-col sm:flex-row justify-between items-center gap-2">
+            <div className="flex gap-2">
+                <Button type="button" variant="outline" size="sm" onClick={handleZoomOut} disabled={zoomLevel <= 0.2}>
+                    <ZoomOut className="mr-1.5 h-4 w-4" /> Zoom Out
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={handleZoomIn} disabled={zoomLevel >= 3}>
+                    <ZoomIn className="mr-1.5 h-4 w-4" /> Zoom In
+                </Button>
+                 <Button type="button" variant="outline" size="sm" onClick={() => setZoomLevel(1)} disabled={zoomLevel === 1}>
+                    Reset Zoom
+                </Button>
+            </div>
+            <div className="flex gap-2">
+                <Button type="button" variant="default" size="sm" onClick={handleDownloadImage} disabled={!selectedImage}>
+                    <Download className="mr-1.5 h-4 w-4" /> Download
+                </Button>
+                <DialogClose asChild>
+                <Button type="button" variant="secondary" size="sm">
+                    Close
+                </Button>
+                </DialogClose>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
     </>
   );
 }
+
+    
