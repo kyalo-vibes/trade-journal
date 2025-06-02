@@ -1,3 +1,4 @@
+
 "use client";
 
 import React from 'react';
@@ -13,8 +14,10 @@ import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
 import type { JournalEntry } from '@/lib/types';
 import { Badge } from '@/components/ui/badge';
 import { format } from 'date-fns';
-import Image from 'next/image';
-import { TrendingUp, TrendingDown, Ban } from 'lucide-react';
+// import Image from 'next/image'; // Image component not used for base64 string directly
+import { TrendingUp, TrendingDown, Ban, ExternalLink } from 'lucide-react';
+import { cn } from "@/lib/utils"
+
 
 interface JournalTableProps {
   entries: JournalEntry[];
@@ -61,14 +64,15 @@ export function JournalTable({ entries }: JournalTableProps) {
         <TableBody>
           {entries.map((entry) => (
             <TableRow key={entry.id} className="hover:bg-muted/80">
-              <TableCell>{format(new Date(entry.date), 'yyyy-MM-dd')}</TableCell>
+              <TableCell>{entry.date instanceof Date ? format(entry.date, 'yyyy-MM-dd') : 'Invalid Date'}</TableCell>
               <TableCell>{entry.time}</TableCell>
               <TableCell>
                 <Badge variant={entry.direction === 'No Trade' ? 'outline' : entry.direction === 'Long' ? 'default' : 'destructive'} 
                        className={cn(
-                         entry.direction === 'Long' && 'bg-positive/20 text-positive border-positive/50',
-                         entry.direction === 'Short' && 'bg-negative/20 text-negative border-negative/50',
-                         entry.direction === 'No Trade' && 'bg-muted text-muted-foreground'
+                         'flex items-center',
+                         entry.direction === 'Long' && 'bg-positive/20 text-positive border-positive/50 hover:bg-positive/30',
+                         entry.direction === 'Short' && 'bg-negative/20 text-negative border-negative/50 hover:bg-negative/30',
+                         entry.direction === 'No Trade' && 'bg-muted text-muted-foreground border-muted-foreground/50 hover:bg-muted/80'
                        )}
                 >
                   <DirectionIcon direction={entry.direction} />
@@ -90,20 +94,27 @@ export function JournalTable({ entries }: JournalTableProps) {
               </TableCell>
               <TableCell className="text-right">{entry.accountBalanceAtEntry.toFixed(2)}</TableCell>
               <TableCell>
-                {entry.screenshot ? (
-                  <a href={entry.screenshot} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
-                    View
+                {entry.screenshot && entry.screenshot.startsWith('data:image') ? (
+                  <a 
+                    href={entry.screenshot} 
+                    target="_blank" 
+                    rel="noopener noreferrer" 
+                    className="text-primary hover:underline flex items-center"
+                  >
+                    View <ExternalLink className="ml-1 h-4 w-4" />
                   </a>
+                ) : entry.screenshot ? (
+                  <span className="text-muted-foreground italic text-xs">Ref: {entry.screenshot}</span>
                 ) : (
                   'N/A'
                 )}
               </TableCell>
-              <TableCell className="max-w-xs truncate" title={entry.notes}>{entry.notes ?? 'N/A'}</TableCell>
+              <TableCell className="max-w-xs truncate whitespace-normal" title={entry.notes}>{entry.notes ?? 'N/A'}</TableCell>
               <TableCell className="text-center">{entry.disciplineRating}/5</TableCell>
-              <TableCell className="max-w-xs truncate" title={entry.emotionalState}>{entry.emotionalState ?? 'N/A'}</TableCell>
+              <TableCell className="max-w-xs truncate whitespace-normal" title={entry.emotionalState}>{entry.emotionalState ?? 'N/A'}</TableCell>
               <TableCell>{entry.session ?? 'N/A'}</TableCell>
-              <TableCell className="max-w-xs truncate" title={entry.reasonForEntry}>{entry.reasonForEntry ?? 'N/A'}</TableCell>
-              <TableCell className="max-w-xs truncate" title={entry.reasonForExit}>{entry.reasonForExit ?? 'N/A'}</TableCell>
+              <TableCell className="max-w-xs truncate whitespace-normal" title={entry.reasonForEntry}>{entry.reasonForEntry ?? 'N/A'}</TableCell>
+              <TableCell className="max-w-xs truncate whitespace-normal" title={entry.reasonForExit}>{entry.reasonForExit ?? 'N/A'}</TableCell>
             </TableRow>
           ))}
         </TableBody>

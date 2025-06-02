@@ -1,44 +1,63 @@
-import { format } from 'date-fns';
-import type { JournalEntry, JournalData } from './types';
 
-const CSV_HEADERS: (keyof JournalEntry | 'accountName' | 'initialBalance')[] = [
-  'id', 'date', 'time', 'direction', 'market', 
-  'entryPrice', 'accountBalanceAtEntry', 'positionSize', 'slPrice', 'tpPrice', 
-  'actualExitPrice', 'rrr', 'pl', 'screenshot', 'notes', 
-  'disciplineRating', 'emotionalState', 'session', 'reasonForEntry', 'reasonForExit'
+import { format, parseISO } from 'date-fns';
+import type { JournalEntry, JournalData, TradeDirection } from './types';
+
+// Headers for CSV export and import.
+// Note: 'accountName' and 'initialBalance' are part of JournalData, not JournalEntry.
+// They will be included in each row for export to simplify having one CSV structure.
+// During import, the first row's accountName and initialBalance will be used for the account.
+const CSV_COLUMN_ORDER: (keyof JournalEntry | 'accountName' | 'initialBalance')[] = [
+  'accountName', 
+  'initialBalance',
+  'id', // Firestore ID will be included on export, ignored on import (new IDs generated)
+  'date', 
+  'time', 
+  'direction', 
+  'market', 
+  'entryPrice', 
+  'accountBalanceAtEntry', 
+  'positionSize', 
+  'slPrice', 
+  'tpPrice', 
+  'actualExitPrice', 
+  'rrr', 
+  'pl', 
+  'screenshot', // Will store "has_screenshot" or similar; actual image data not in CSV
+  'notes', 
+  'disciplineRating', 
+  'emotionalState', 
+  'session', 
+  'reasonForEntry', 
+  'reasonForExit'
 ];
 
-// Extended headers for full data export including account info
-const FULL_DATA_CSV_HEADERS: string[] = [
-  'accountName', 'initialBalance', // These will be repeated for each entry row during export for simplicity or handled differently
-  'id', 'date', 'time', 'direction', 'market', 
-  'entryPrice', 'accountBalanceAtEntry', 'positionSize', 'slPrice', 'tpPrice', 
-  'actualExitPrice', 'rrr', 'pl', 'screenshot', 'notes', 
-  'disciplineRating', 'emotionalState', 'session', 'reasonForEntry', 'reasonForExit'
-];
-
+// Helper to serialize a value for CSV, handling quotes and commas.
+const serializeCSVValue = (value: any): string => {
+  if (value === null || value === undefined) return '';
+  const stringValue = String(value);
+  // If the value contains a comma, newline, or double quote, enclose it in double quotes.
+  // Also, double up any existing double quotes within the value.
+  if (stringValue.includes(',') || stringValue.includes('\n') || stringValue.includes('"')) {
+    return `"${stringValue.replace(/"/g, '""')}"`;
+  }
+  return stringValue;
+};
 
 export function exportJournalDataToCSV(data: JournalData): void {
   const { accountName, initialBalance, entries } = data;
 
-  const headerString = FULL_DATA_CSV_HEADERS.join(',');
+  const headerString = CSV_COLUMN_ORDER.join(',');
   
   const rows = entries.map(entry => {
-    const entryData = {
-      accountName,
-      initialBalance,
+    const entryDataForCSV: Record<string, any> = {
+      accountName, // Add accountName to each row
+      initialBalance, // Add initialBalance to each row
       ...entry,
-      date: format(new Date(entry.date), 'yyyy-MM-dd'), // Format date for CSV
-      // Screenshot is Base64, can be very long. Might want to export a link or omit. For now, include.
-      screenshot: entry.screenshot ? 'has_screenshot' : '', // Indicate presence instead of full base64
+      date: entry.date instanceof Date ? format(entry.date, 'yyyy-MM-dd') : String(entry.date),
+      screenshot: entry.screenshot && entry.screenshot.startsWith('data:image') ? 'has_screenshot' : '', // Indicate presence
     };
 
-    return FULL_DATA_CSV_HEADERS.map(header => {
-      const value = entryData[header as keyof typeof entryData];
-      if (value === null || value === undefined) return '';
-      // Escape commas and newlines in string values
-      return typeof value === 'string' ? `"${value.replace(/"/g, '""')}"` : value;
-    }).join(',');
+    return CSV_COLUMN_ORDER.map(header => serializeCSVValue(entryDataForCSV[header])).join(',');
   });
 
   const csvContent = [headerString, ...rows].join('\n');
@@ -48,97 +67,151 @@ export function exportJournalDataToCSV(data: JournalData): void {
   if (link.download !== undefined) {
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
-    link.setAttribute('download', `${accountName}_trading_journal_${format(new Date(), 'yyyyMMdd')}.csv`);
+    const filenameSafeAccountName = accountName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    link.setAttribute('download', `${filenameSafeAccountName}_journal_${format(new Date(), 'yyyyMMdd_HHmmss')}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   }
 }
+
+// Basic CSV row parser that handles quoted fields containing commas and escaped quotes
+function parseCSVRow(rowString: string): string[] {
+  const values = [];
+  let currentVal = '';
+  let inQuotes = false;
+  for (let i = 0; i < rowString.length; i++) {
+    const char = rowString[i];
+    if (char === '"') {
+      if (inQuotes && i + 1 < rowString.length && rowString[i+1] === '"') {
+        // Escaped quote " "
+        currentVal += '"';
+        i++; // Skip next quote
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === ',' && !inQuotes) {
+      values.push(currentVal);
+      currentVal = '';
+    } else {
+      currentVal += char;
+    }
+  }
+  values.push(currentVal); // Add last value
+  return values.map(v => v.trim());
+}
+
 
 export function importJournalDataFromCSV(csvString: string): JournalData | null {
   try {
     const lines = csvString.split('\n').map(line => line.trim()).filter(line => line);
-    if (lines.length < 2) return null; // Must have header + at least one data row
+    if (lines.length < 1) return null; // Must have at least a header row
 
     const headerLine = lines[0];
-    // Basic CSV parsing for headers, doesn't handle quoted commas in headers itself
-    const headers = headerLine.split(',').map(h => h.replace(/^"|"$/g, '').trim());
+    const headers = parseCSVRow(headerLine).map(h => h.replace(/^"|"$/g, '').trim() as keyof JournalEntry | 'accountName' | 'initialBalance');
     
+    // Determine column indices
+    const colIndices: Partial<Record<keyof JournalEntry | 'accountName' | 'initialBalance', number>> = {};
+    CSV_COLUMN_ORDER.forEach(colName => {
+        const index = headers.indexOf(colName);
+        if (index !== -1) {
+            colIndices[colName] = index;
+        }
+    });
+
+
     let accountName = "Imported Account";
     let initialBalance = 0;
     const entries: JournalEntry[] = [];
 
-    const accountNameIndex = headers.indexOf('accountName');
-    const initialBalanceIndex = headers.indexOf('initialBalance');
-
-    if (lines.length > 1) {
-        const firstDataRowValues = parseCSVRow(lines[1], headers.length);
-        if (accountNameIndex !== -1 && firstDataRowValues[accountNameIndex]) {
-            accountName = firstDataRowValues[accountNameIndex];
-        }
-        if (initialBalanceIndex !== -1 && firstDataRowValues[initialBalanceIndex]) {
-            initialBalance = parseFloat(firstDataRowValues[initialBalanceIndex]) || 0;
-        }
+    // Attempt to get accountName and initialBalance from the first data row if present
+    if (lines.length > 1 && colIndices.accountName !== undefined && colIndices.initialBalance !== undefined) {
+        const firstDataRowValues = parseCSVRow(lines[1]);
+        accountName = firstDataRowValues[colIndices.accountName!] || accountName;
+        initialBalance = parseFloat(firstDataRowValues[colIndices.initialBalance!]) || initialBalance;
     }
+    
+    const dataRows = lines.slice(1); // All lines except the header
 
-
-    for (let i = 1; i < lines.length; i++) {
-      const values = parseCSVRow(lines[i], headers.length);
-      if (values.length !== headers.length) {
-        console.warn(`Skipping malformed row ${i+1}: Expected ${headers.length} values, got ${values.length}`);
+    for (const line of dataRows) {
+      const values = parseCSVRow(line);
+      if (values.length < headers.length) { // Allow more values, but not less
+        console.warn(`Skipping malformed row: Expected at least ${headers.length} values, got ${values.length}. Row: ${line}`);
         continue;
       }
 
-      const entry: Partial<JournalEntry & { accountName?: string; initialBalance?: number }> = {};
-      headers.forEach((header, index) => {
-        const key = header as keyof JournalEntry;
+      const entry: Partial<JournalEntry> = {};
+
+      // Use colIndices to map values to entry properties
+      (Object.keys(colIndices) as Array<keyof typeof colIndices>).forEach(key => {
+        const index = colIndices[key]!;
         const value = values[index];
-        
-        if (value === '' || value === 'N/A') {
-          entry[key] = undefined;
+
+        if (value === '' || value === 'N/A' || value === undefined) {
+          (entry as any)[key] = undefined;
           return;
         }
-
+        
+        // Type conversions
         switch (key) {
-          case 'date':
-            entry.date = new Date(value);
+          case 'id': entry.id = value; break; // Will be overridden by Firestore, but good to parse
+          case 'date': 
+            const parsedDate = parseISO(value); // date-fns parseISO for yyyy-MM-dd
+            if (!isNaN(parsedDate.getTime())) {
+                 entry.date = parsedDate;
+            } else {
+                entry.date = new Date(); // fallback, or handle error
+                console.warn(`Invalid date format for row: ${value}. Using current date.`);
+            }
             break;
-          case 'entryPrice':
-          case 'accountBalanceAtEntry':
-          case 'positionSize':
-          case 'slPrice':
-          case 'tpPrice':
-          case 'actualExitPrice':
+          case 'time': entry.time = value; break;
+          case 'direction': entry.direction = value as TradeDirection; break;
+          case 'market': entry.market = value; break;
+          case 'entryPrice': 
+          case 'accountBalanceAtEntry': 
+          case 'positionSize': 
+          case 'slPrice': 
+          case 'tpPrice': 
+          case 'actualExitPrice': 
           case 'pl':
+            (entry as any)[key] = parseFloat(value);
+            break;
           case 'disciplineRating':
-            entry[key] = parseFloat(value);
+            const rating = parseInt(value, 10);
+            if (rating >= 1 && rating <= 5) entry.disciplineRating = rating as 1 | 2 | 3 | 4 | 5;
+            else entry.disciplineRating = 3; // fallback
             break;
-          case 'direction':
-             entry.direction = value as JournalEntry['direction'];
-             break;
+          case 'rrr': entry.rrr = value; break;
           case 'screenshot':
-            // During import, 'has_screenshot' indicates a screenshot existed.
-            // We don't re-import the actual image data from this CSV field.
-            // User would need to re-upload if editing.
-            entry.screenshot = value === 'has_screenshot' ? 'Screenshot was present' : undefined;
+            entry.screenshot = value === 'has_screenshot' ? 'Screenshot was present (re-upload if needed)' : undefined;
             break;
+          case 'notes': entry.notes = value; break;
+          case 'emotionalState': entry.emotionalState = value; break;
+          case 'session': entry.session = value; break;
+          case 'reasonForEntry': entry.reasonForEntry = value; break;
+          case 'reasonForExit': entry.reasonForExit = value; break;
           default:
-            entry[key] = value;
+            // For 'accountName' and 'initialBalance', they are handled above.
+            // Any other unknown keys from CSV_COLUMN_ORDER can be ignored for the entry object.
+            break;
         }
       });
       
-      // Validate required fields for a JournalEntry
-      if (entry.id && entry.date && entry.time && entry.direction && entry.market && entry.accountBalanceAtEntry !== undefined && entry.disciplineRating) {
+      // Basic validation for a journal entry
+      if (entry.date && entry.time && entry.direction && entry.market && entry.accountBalanceAtEntry !== undefined && entry.disciplineRating) {
+         // Firestore will generate an ID, so we don't strictly need one from CSV for new entries.
+         // If an ID was parsed, it might be used for update logic if desired, but here we assume new entries.
+         if (!entry.id) entry.id = `csv_import_${Date.now()}_${Math.random().toString(36).substring(2,7)}`;
          entries.push(entry as JournalEntry);
       } else {
-        console.warn("Skipping row due to missing required fields:", entry);
+        console.warn("Skipping row due to missing required fields or parse errors. Parsed data:", entry, "Original line:", line);
       }
     }
     
-    if (entries.length === 0 && lines.length > 1) {
-        // if no entries parsed but there was data, it implies format issue or only account data
-        console.warn("CSV imported, but no valid journal entries found. Check CSV format.");
+    if (entries.length === 0 && dataRows.length > 0) {
+        console.warn("CSV imported, but no valid journal entries parsed. Check CSV format and content.");
     }
 
     return { accountName, initialBalance, entries };
@@ -149,37 +222,3 @@ export function importJournalDataFromCSV(csvString: string): JournalData | null 
   }
 }
 
-// Basic CSV row parser that handles quoted fields containing commas
-function parseCSVRow(rowString: string, expectedLength: number): string[] {
-  const values = [];
-  let currentVal = '';
-  let inQuotes = false;
-  for (let i = 0; i < rowString.length; i++) {
-    const char = rowString[i];
-    if (char === '"') {
-      if (inQuotes && i + 1 < rowString.length && rowString[i+1] === '"') {
-        // Escaped quote
-        currentVal += '"';
-        i++; // Skip next quote
-      } else {
-        inQuotes = !inQuotes;
-      }
-    } else if (char === ',' && !inQuotes) {
-      values.push(currentVal.trim());
-      currentVal = '';
-    } else {
-      currentVal += char;
-    }
-  }
-  values.push(currentVal.trim()); // Add last value
-
-  // Pad with empty strings if row is shorter than expected (e.g. trailing commas omitted)
-  while(values.length < expectedLength) {
-    values.push('');
-  }
-  // Truncate if row is longer (e.g. extra commas at end)
-  if (values.length > expectedLength) {
-    return values.slice(0, expectedLength);
-  }
-  return values;
-}

@@ -1,6 +1,21 @@
+
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import {
+  doc,
+  collection,
+  onSnapshot,
+  setDoc,
+  addDoc,
+  query,
+  orderBy,
+  writeBatch,
+  Timestamp,
+  deleteDoc,
+  getDocs
+} from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 import { JournalEntryForm } from '@/components/journal/JournalEntryForm';
 import { JournalTable } from '@/components/journal/JournalTable';
 import type { JournalEntry, JournalData } from '@/lib/types';
@@ -10,8 +25,10 @@ import { Button } from '@/components/ui/button';
 import { exportJournalDataToCSV, importJournalDataFromCSV } from '@/lib/csv';
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Download, UploadCloud, DollarSign, Edit3, ListChecks } from 'lucide-react';
+import { Download, UploadCloud, DollarSign, ListChecks, Loader2 } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
+
+const ACCOUNT_ID = "default_account"; // Using a fixed account ID for now
 
 const calculateRRR = (direction?: JournalEntry['direction'], entryPrice?: number, slPrice?: number, tpPrice?: number): string => {
   if (!direction || direction === 'No Trade' || entryPrice === undefined || slPrice === undefined || tpPrice === undefined) return "N/A";
@@ -47,59 +64,128 @@ export default function TradingJournalPage() {
   const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([]);
   const [currentBalance, setCurrentBalance] = useState<number>(initialBalance);
   const [accountBalanceForNewEntry, setAccountBalanceForNewEntry] = useState<number>(initialBalance);
+  
+  const [isLoadingAccount, setIsLoadingAccount] = useState<boolean>(true);
+  const [isLoadingEntries, setIsLoadingEntries] = useState<boolean>(true);
 
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Fetch and subscribe to account details
   useEffect(() => {
-    const storedData = localStorage.getItem('tradingJournalData');
-    if (storedData) {
-      try {
-        const parsedData: JournalData = JSON.parse(storedData);
-        // Ensure dates are Date objects
-        parsedData.entries = parsedData.entries.map(entry => ({
-          ...entry,
-          date: new Date(entry.date) 
-        }));
-        setAccountName(parsedData.accountName);
-        setInitialBalance(parsedData.initialBalance);
-        setJournalEntries(parsedData.entries);
-      } catch (error) {
-        console.error("Failed to parse stored journal data:", error);
-        localStorage.removeItem('tradingJournalData'); // Clear corrupted data
+    if (!db) return;
+    setIsLoadingAccount(true);
+    const accountDocRef = doc(db, "accounts", ACCOUNT_ID);
+    const unsubscribe = onSnapshot(accountDocRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setAccountName(data.name || 'Demo Account');
+        setInitialBalance(data.initialBalance || 10000);
+      } else {
+        // Account doesn't exist, create it with default values
+        setDoc(accountDocRef, { name: 'Demo Account', initialBalance: 10000 })
+          .then(() => console.log("Default account created"))
+          .catch(error => console.error("Error creating default account:", error));
       }
-    }
+      setIsLoadingAccount(false);
+    }, (error) => {
+      console.error("Error fetching account details:", error);
+      toast({ title: "Error", description: "Could not load account details.", variant: "destructive" });
+      setIsLoadingAccount(false);
+    });
+    return () => unsubscribe();
   }, []);
-  
+
+  // Fetch and subscribe to journal entries
   useEffect(() => {
-    const dataToStore: JournalData = { accountName, initialBalance, entries: journalEntries };
-    localStorage.setItem('tradingJournalData', JSON.stringify(dataToStore));
-  }, [accountName, initialBalance, journalEntries]);
+    if (!db) return;
+    setIsLoadingEntries(true);
+    const entriesColRef = collection(db, "accounts", ACCOUNT_ID, "entries");
+    const q = query(entriesColRef, orderBy("date", "asc")); // Order by date
 
+    const unsubscribe = onSnapshot(q, (querySnapshot) => {
+      const entries: JournalEntry[] = [];
+      querySnapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        entries.push({
+          ...data,
+          id: docSnap.id,
+          date: (data.date as Timestamp).toDate(), // Convert Firestore Timestamp to JS Date
+        } as JournalEntry);
+      });
+      setJournalEntries(entries);
+      setIsLoadingEntries(false);
+    }, (error) => {
+      console.error("Error fetching journal entries:", error);
+      toast({ title: "Error", description: "Could not load journal entries.", variant: "destructive" });
+      setIsLoadingEntries(false);
+    });
+    return () => unsubscribe();
+  }, []);
 
+  // Update account details in Firestore when local state changes
+  const handleAccountNameChange = async (newName: string) => {
+    setAccountName(newName);
+    if (!db) return;
+    const accountDocRef = doc(db, "accounts", ACCOUNT_ID);
+    try {
+      await setDoc(accountDocRef, { name: newName }, { merge: true });
+    } catch (error) {
+      console.error("Error updating account name:", error);
+      toast({ title: "Error", description: "Could not save account name.", variant: "destructive" });
+    }
+  };
+
+  const handleInitialBalanceChange = async (newBalance: number) => {
+    setInitialBalance(newBalance);
+    if (!db) return;
+    const accountDocRef = doc(db, "accounts", ACCOUNT_ID);
+    try {
+      await setDoc(accountDocRef, { initialBalance: newBalance }, { merge: true });
+    } catch (error) {
+      console.error("Error updating initial balance:", error);
+      toast({ title: "Error", description: "Could not save initial balance.", variant: "destructive" });
+    }
+  };
+  
   useEffect(() => {
     const totalPL = journalEntries.reduce((sum, entry) => sum + (entry.pl || 0), 0);
     setCurrentBalance(initialBalance + totalPL);
 
     if (journalEntries.length > 0) {
-        const lastEntry = journalEntries[journalEntries.length - 1];
-        setAccountBalanceForNewEntry(lastEntry.accountBalanceAtEntry + (lastEntry.pl || 0));
+        const lastEntryWithBalance = [...journalEntries].reverse().find(entry => entry.accountBalanceAtEntry !== undefined && entry.pl !== undefined);
+        if (lastEntryWithBalance) {
+            setAccountBalanceForNewEntry(lastEntryWithBalance.accountBalanceAtEntry + (lastEntryWithBalance.pl || 0));
+        } else {
+            setAccountBalanceForNewEntry(initialBalance);
+        }
     } else {
         setAccountBalanceForNewEntry(initialBalance);
     }
   }, [initialBalance, journalEntries]);
 
-  const handleAddEntry = useCallback((newEntryData: Omit<JournalEntry, 'id' | 'accountBalanceAtEntry' | 'rrr'>) => {
+  const handleAddEntry = useCallback(async (newEntryData: Omit<JournalEntry, 'id' | 'accountBalanceAtEntry' | 'rrr'>) => {
+    if (!db) {
+      toast({ title: "Error", description: "Database not connected.", variant: "destructive" });
+      return;
+    }
     const rrr = calculateRRR(newEntryData.direction, newEntryData.entryPrice, newEntryData.slPrice, newEntryData.tpPrice);
     
-    const entryWithFullDetails: JournalEntry = {
+    const entryToSave = {
       ...newEntryData,
-      id: crypto.randomUUID(),
       accountBalanceAtEntry: accountBalanceForNewEntry,
       rrr: rrr,
+      date: Timestamp.fromDate(newEntryData.date), // Convert JS Date to Firestore Timestamp for saving
     };
-    setJournalEntries(prevEntries => [...prevEntries, entryWithFullDetails]);
-    toast({ title: "Entry Added", description: `Trade for ${newEntryData.market} logged successfully.` });
+
+    try {
+      const entriesColRef = collection(db, "accounts", ACCOUNT_ID, "entries");
+      await addDoc(entriesColRef, entryToSave);
+      toast({ title: "Entry Added", description: `Trade for ${newEntryData.market} logged successfully.` });
+    } catch (error) {
+      console.error("Error adding entry to Firestore:", error);
+      toast({ title: "Error", description: "Could not save entry.", variant: "destructive" });
+    }
   }, [accountBalanceForNewEntry, toast]);
 
   const handleExportCSV = () => {
@@ -107,38 +193,82 @@ export default function TradingJournalPage() {
       toast({ title: "Export Failed", description: "No entries to export.", variant: "destructive" });
       return;
     }
-    exportJournalDataToCSV({ accountName, initialBalance, entries: journalEntries });
+    // Ensure date is JS Date for CSV export, though it's already converted from Firestore
+    const entriesForExport = journalEntries.map(e => ({...e, date: new Date(e.date)}));
+    exportJournalDataToCSV({ accountName, initialBalance, entries: entriesForExport });
     toast({ title: "Export Successful", description: "Journal data exported to CSV." });
   };
 
-  const handleImportCSV = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImportCSV = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (file) {
+    if (file && db) {
       const reader = new FileReader();
-      reader.onload = (e) => {
+      reader.onload = async (e) => {
         const csvString = e.target?.result as string;
         const importedData = importJournalDataFromCSV(csvString);
+        
         if (importedData) {
-          // Ensure dates are Date objects after import
-          importedData.entries = importedData.entries.map(entry => ({
-            ...entry,
-            date: new Date(entry.date) 
-          }));
-          setAccountName(importedData.accountName);
-          setInitialBalance(importedData.initialBalance);
-          setJournalEntries(importedData.entries);
-          toast({ title: "Import Successful", description: "Journal data imported from CSV." });
+          setIsLoadingAccount(true);
+          setIsLoadingEntries(true);
+          const batch = writeBatch(db);
+          const accountDocRef = doc(db, "accounts", ACCOUNT_ID);
+          
+          // Update account details
+          batch.set(accountDocRef, { 
+            name: importedData.accountName, 
+            initialBalance: importedData.initialBalance 
+          }, { merge: true });
+
+          // Clear existing entries before importing new ones for simplicity
+          // More complex merging could be implemented if needed
+          const entriesColRef = collection(db, "accounts", ACCOUNT_ID, "entries");
+          const existingEntriesSnapshot = await getDocs(entriesColRef);
+          existingEntriesSnapshot.forEach(docSnap => {
+            batch.delete(docSnap.ref);
+          });
+          
+          // Add imported entries
+          importedData.entries.forEach(entry => {
+            const { id, ...entryData } = entry; // Firestore will generate new IDs
+            const newEntryRef = doc(collection(db, "accounts", ACCOUNT_ID, "entries"));
+            batch.set(newEntryRef, {
+              ...entryData,
+              date: Timestamp.fromDate(new Date(entry.date)), // Ensure date is Firestore Timestamp
+            });
+          });
+
+          try {
+            await batch.commit();
+            setAccountName(importedData.accountName); // Update local state after successful Firestore update
+            setInitialBalance(importedData.initialBalance);
+            // Entries will be updated by onSnapshot listener
+            toast({ title: "Import Successful", description: "Journal data imported and saved to Firestore." });
+          } catch (error) {
+            console.error("Error importing data to Firestore:", error);
+            toast({ title: "Import Failed", description: "Could not save imported data to Firestore.", variant: "destructive" });
+          } finally {
+            setIsLoadingAccount(false); // Let onSnapshot handle final state
+            setIsLoadingEntries(false);
+          }
         } else {
           toast({ title: "Import Failed", description: "Could not parse CSV file. Please check format.", variant: "destructive" });
         }
       };
       reader.readAsText(file);
     }
-    // Reset file input to allow importing the same file again if needed
     if (fileInputRef.current) {
         fileInputRef.current.value = "";
     }
   };
+
+  if (isLoadingAccount || isLoadingEntries) {
+    return (
+      <div className="container mx-auto p-4 md:p-8 font-body flex flex-col items-center justify-center min-h-screen">
+        <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
+        <p className="text-muted-foreground">Loading journal data...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="container mx-auto p-4 md:p-8 font-body">
@@ -160,7 +290,7 @@ export default function TradingJournalPage() {
                     id="accountName"
                     type="text"
                     value={accountName}
-                    onChange={(e) => setAccountName(e.target.value)}
+                    onChange={(e) => handleAccountNameChange(e.target.value)}
                     className="mt-1 bg-muted border-border focus:ring-primary font-headline text-lg"
                 />
                 </div>
@@ -170,7 +300,7 @@ export default function TradingJournalPage() {
                     id="initialBalance"
                     type="number"
                     value={initialBalance}
-                    onChange={(e) => setInitialBalance(parseFloat(e.target.value) || 0)}
+                    onChange={(e) => handleInitialBalanceChange(parseFloat(e.target.value) || 0)}
                     className="mt-1 bg-muted border-border focus:ring-primary text-lg"
                 />
                 </div>
