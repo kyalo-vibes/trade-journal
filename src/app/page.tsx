@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { exportJournalDataToCSV, importJournalDataFromCSV } from '@/lib/csv';
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Download, UploadCloud, DollarSign, ListChecks, Loader2, RefreshCw } from 'lucide-react';
+import { Download, UploadCloud, DollarSign, ListChecks, Loader2 } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { nanoid } from 'nanoid';
 
@@ -56,7 +56,8 @@ export default function TradingJournalPage() {
 
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const journalFormRef = useRef<{ resetForm: () => void }>(null);
+  const journalFormComponentRef = useRef<{ resetForm: () => void }>(null);
+  const formSectionRef = useRef<HTMLElement>(null);
 
 
   useEffect(() => {
@@ -65,14 +66,9 @@ export default function TradingJournalPage() {
     setCurrentBalance(newCurrentBalance);
 
     if (journalEntries.length > 0) {
-        const lastEntryWithPL = [...journalEntries].reverse().find(entry => entry.pl !== undefined);
-        if (lastEntryWithPL) {
-            setAccountBalanceForNewEntry(lastEntryWithPL.accountBalanceAtEntry + (lastEntryWithPL.pl || 0));
-        } else {
-            // If no entries have P/L, use the initial balance plus P/L of all entries (which would be 0 if no P/L)
-            // Or more simply, the current balance, which already accounts for this.
-            setAccountBalanceForNewEntry(newCurrentBalance);
-        }
+        // The balance for a new entry should be the current balance before this new entry is added.
+        // So, it's effectively the current balance *including* P/L from all existing entries.
+        setAccountBalanceForNewEntry(newCurrentBalance);
     } else {
         setAccountBalanceForNewEntry(initialBalance);
     }
@@ -89,7 +85,7 @@ export default function TradingJournalPage() {
 
   const handleSaveEntry = useCallback((entryData: Omit<JournalEntry, 'id' | 'accountBalanceAtEntry' | 'rrr'> | JournalEntry) => {
     startTransition(() => {
-      if ('id' in entryData) { // Editing existing entry
+      if ('id' in entryData && entryData.id) { // Editing existing entry
         const rrr = calculateRRR(entryData.direction, entryData.entryPrice, entryData.slPrice, entryData.tpPrice);
         const updatedEntry = { ...entryData, rrr };
         setJournalEntries(prevEntries => prevEntries.map(e => e.id === updatedEntry.id ? updatedEntry : e));
@@ -100,24 +96,26 @@ export default function TradingJournalPage() {
         const entryToAdd: JournalEntry = {
           id: nanoid(),
           ...entryData,
-          accountBalanceAtEntry: accountBalanceForNewEntry, // Use calculated balance for new entries
+          accountBalanceAtEntry: accountBalanceForNewEntry,
           rrr: rrr,
         };
         setJournalEntries(prevEntries => [...prevEntries, entryToAdd]);
         toast({ title: "Entry Added", description: `Trade for ${entryData.market} logged.` });
       }
-      journalFormRef.current?.resetForm();
+      journalFormComponentRef.current?.resetForm();
     });
-  }, [accountBalanceForNewEntry, toast, journalEntries]);
+  }, [accountBalanceForNewEntry, toast, journalEntries]); // Removed journalEntries from deps to avoid potential loops, review if needed for other logic
 
   const handleSetEditingEntry = useCallback((entry: JournalEntry) => {
     setEditingEntry(entry);
-    window.scrollTo({ top: journalFormRef.current ? (journalFormRef.current as any).offsetTop - 20 : 0, behavior: 'smooth' });
+    if (formSectionRef.current) {
+      window.scrollTo({ top: formSectionRef.current.offsetTop - 20, behavior: 'smooth' });
+    }
   }, []);
 
   const handleCancelEdit = useCallback(() => {
     setEditingEntry(null);
-    journalFormRef.current?.resetForm();
+    journalFormComponentRef.current?.resetForm();
   }, []);
 
 
@@ -154,6 +152,7 @@ export default function TradingJournalPage() {
             if (importedData) {
               setAccountName(importedData.accountName);
               setInitialBalance(importedData.initialBalance);
+              // Ensure all imported entries have an ID, generate if missing
               const entriesWithIds = importedData.entries.map(entry => ({
                 ...entry,
                 id: entry.id || nanoid(), 
@@ -161,7 +160,7 @@ export default function TradingJournalPage() {
               setJournalEntries(entriesWithIds as JournalEntry[]);
               toast({ title: "Import Successful", description: "Journal data loaded from CSV." });
               setEditingEntry(null); // Clear any editing state
-              journalFormRef.current?.resetForm();
+              journalFormComponentRef.current?.resetForm();
             } else {
               toast({ title: "Import Failed", description: "Could not parse CSV file. Please check format.", variant: "destructive" });
             }
@@ -248,8 +247,9 @@ export default function TradingJournalPage() {
       
       <Separator className="my-12" />
 
-      <section className="mb-12" ref={journalFormRef as any}>
+      <section className="mb-12" ref={formSectionRef}>
         <JournalEntryForm 
+          ref={journalFormComponentRef}
           onSave={handleSaveEntry} 
           accountBalanceAtFormInit={editingEntry ? editingEntry.accountBalanceAtEntry : accountBalanceForNewEntry} 
           disabled={isPending || isProcessingFile}
@@ -282,4 +282,6 @@ export default function TradingJournalPage() {
     </div>
   );
 }
+    
+
     
