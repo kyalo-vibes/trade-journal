@@ -13,7 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Download, UploadCloud, DollarSign, ListChecks, Loader2, TrendingUp, TrendingDown, Percent, Hash } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
-import { nanoid } from 'nanoid';
+import { nanoid } from 'nanoid'; // For generating unique IDs locally
 
 const calculateRRR = (direction?: JournalEntry['direction'], entryPrice?: number, slPrice?: number, tpPrice?: number): string => {
   if (!direction || direction === 'No Trade' || entryPrice === undefined || slPrice === undefined || tpPrice === undefined) return "N/A";
@@ -79,9 +79,12 @@ export default function TradingJournalPage() {
     const actualTrades = journalEntries.filter(entry => entry.direction === 'Long' || entry.direction === 'Short');
     setNumberOfActualTrades(actualTrades.length);
 
-    if (initialBalance > 0) {
+    if (initialBalance > 0 && initialBalance !== 0) { // Avoid division by zero
       setAccountPercentageChange((calculatedTotalPL / initialBalance) * 100);
-    } else {
+    } else if (calculatedTotalPL > 0) {
+      setAccountPercentageChange(100); // If initial balance was 0 and P/L is positive, it's 100% gain effectively
+    }
+     else {
       setAccountPercentageChange(0);
     }
 
@@ -114,7 +117,7 @@ export default function TradingJournalPage() {
       } else { 
         const rrr = calculateRRR(entryData.direction, entryData.entryPrice, entryData.slPrice, entryData.tpPrice);
         const entryToAdd: JournalEntry = {
-          id: nanoid(),
+          id: nanoid(), // Generate unique ID locally
           ...entryData,
           accountBalanceAtEntry: accountBalanceForNewEntry,
           rrr: rrr,
@@ -172,6 +175,7 @@ export default function TradingJournalPage() {
             if (importedData) {
               setAccountName(importedData.accountName);
               setInitialBalance(importedData.initialBalance);
+              // Ensure imported entries have unique IDs if not present or to avoid conflicts
               const entriesWithIds = importedData.entries.map(entry => ({
                 ...entry,
                 id: entry.id || nanoid(), 
@@ -275,7 +279,10 @@ export default function TradingJournalPage() {
                 <p className={`font-bold text-lg font-headline ${totalPL >= 0 ? 'text-positive' : 'text-negative'}`}>{totalPL.toFixed(2)}</p>
               </div>
               <div className="bg-muted p-3 rounded-md">
-                <Label className="font-headline text-xs text-muted-foreground flex items-center"><Percent className="mr-1 h-3 w-3"/>Account Change</Label>
+                <Label className="font-headline text-xs text-muted-foreground flex items-center">
+                 {(accountPercentageChange >= 0) ? <TrendingUp className="mr-1 h-3 w-3 text-positive"/> : <TrendingDown className="mr-1 h-3 w-3 text-negative"/>}
+                  Account Change
+                </Label>
                 <p className={`font-bold text-lg font-headline ${accountPercentageChange >= 0 ? 'text-positive' : 'text-negative'}`}>{accountPercentageChange.toFixed(2)}%</p>
               </div>
               <div className="bg-muted p-3 rounded-md">

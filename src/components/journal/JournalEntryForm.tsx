@@ -32,8 +32,8 @@ const entrySchema = z.object({
   positionSize: z.coerce.number().optional(),
   slPrice: z.coerce.number().optional(),
   tpPrice: z.coerce.number().optional(),
-  actualExitPrice: z.coerce.number().optional(),
-  pl: z.coerce.number().optional(),
+  actualExitPrice: z.coerce.number().optional(), // Optional for ongoing trades
+  pl: z.coerce.number().optional(), // Optional for ongoing trades
   screenshot: z.any().optional(),
   notes: z.string().optional(),
   disciplineRating: z.coerce.number().min(1).max(5),
@@ -163,7 +163,6 @@ export const JournalEntryForm = forwardRef(({ onSave, accountBalanceAtFormInit, 
         reasonForEntry: '',
         reasonForExit: '',
         screenshot: undefined,
-        // id and accountBalanceAtEntry are not part of form defaults managed by RHF for new entries
       });
       setScreenshotPreview(null);
       setScreenshotName(null);
@@ -183,7 +182,7 @@ export const JournalEntryForm = forwardRef(({ onSave, accountBalanceAtFormInit, 
         tpPrice: entryToEdit.tpPrice ?? undefined,
         actualExitPrice: entryToEdit.actualExitPrice ?? undefined,
         pl: entryToEdit.pl ?? undefined,
-        accountBalanceAtEntry: entryToEdit.accountBalanceAtEntry, // This is from the entry, not form init
+        accountBalanceAtEntry: entryToEdit.accountBalanceAtEntry, 
       });
       if (typeof entryToEdit.screenshot === 'string' && entryToEdit.screenshot.startsWith('data:image')) {
         setScreenshotPreview(entryToEdit.screenshot);
@@ -225,8 +224,6 @@ export const JournalEntryForm = forwardRef(({ onSave, accountBalanceAtFormInit, 
   useEffect(() => {
     if (direction && direction !== 'No Trade' && actualExitPrice !== undefined && entryPrice !== undefined && positionSize !== undefined && !isNaN(actualExitPrice) && !isNaN(entryPrice) && !isNaN(positionSize)) {
         const plPoints = direction === 'Long' ? actualExitPrice - entryPrice : entryPrice - actualExitPrice;
-        // P/L calculation should reflect the actual currency value if possible, or points value if currency per point is not available
-        // For now, if 'pl' field is filled, it's the source of truth. If not, this is an estimate.
         setEstimatedPl(`Points value: ${(plPoints * positionSize).toFixed(2)}. Use P/L field for actual currency value.`);
     } else {
         setEstimatedPl("Estimated P/L: N/A");
@@ -264,11 +261,10 @@ export const JournalEntryForm = forwardRef(({ onSave, accountBalanceAtFormInit, 
       onSave({ 
         ...entryToEdit, 
         ...submissionData,
-        accountBalanceAtEntry: entryToEdit.accountBalanceAtEntry, // Ensure this is preserved from original
+        accountBalanceAtEntry: entryToEdit.accountBalanceAtEntry, 
       } as JournalEntry);
     } else {
-      // For new entries, id and accountBalanceAtEntry will be set by parent
-      const { id, accountBalanceAtEntry, ...newEntryData } = submissionData as JournalEntry; // Cast to access props
+      const { id, accountBalanceAtEntry, ...newEntryData } = submissionData as JournalEntry; 
       onSave(newEntryData as Omit<JournalEntry, 'id' | 'accountBalanceAtEntry' | 'rrr'>);
     }
   };
@@ -293,12 +289,11 @@ export const JournalEntryForm = forwardRef(({ onSave, accountBalanceAtFormInit, 
   const commonInputClass = "bg-muted border-border focus:ring-primary";
   const commonLabelClass = "mb-1 text-sm font-medium";
 
-  const numericFieldProps = (field: any) => ({ // field can be from Controller render props
+  const numericFieldProps = (field: any) => ({ 
     ...field,
     value: field.value === undefined || field.value === null || isNaN(field.value) ? '' : String(field.value),
     onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
       const val = e.target.value;
-      // Allow empty string for clearing, otherwise parse as float
       field.onChange(val === '' ? undefined : parseFloat(val));
     },
   });
@@ -360,7 +355,7 @@ export const JournalEntryForm = forwardRef(({ onSave, accountBalanceAtFormInit, 
                   name="market"
                   control={control}
                   render={({ field }) => (
-                    <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value || ''} defaultValue={field.value}>
                       <SelectTrigger id="market" className={commonInputClass}>
                         <SelectValue placeholder="Select market/asset" />
                       </SelectTrigger>
@@ -376,7 +371,7 @@ export const JournalEntryForm = forwardRef(({ onSave, accountBalanceAtFormInit, 
 
               <div>
                   <Label className={commonLabelClass}>Account Balance (at entry)</Label>
-                  <Input value={isEditing && entryToEdit ? entryToEdit.accountBalanceAtEntry.toFixed(2) : accountBalanceAtFormInit.toFixed(2)} readOnly disabled className={`${commonInputClass} opacity-70 cursor-not-allowed`} />
+                  <Input value={(isEditing && entryToEdit ? entryToEdit.accountBalanceAtEntry : accountBalanceAtFormInit).toFixed(2)} readOnly disabled className={`${commonInputClass} opacity-70 cursor-not-allowed`} />
               </div>
 
               {isTrade && (
@@ -456,14 +451,14 @@ export const JournalEntryForm = forwardRef(({ onSave, accountBalanceAtFormInit, 
                 <Controller
                     name="screenshot"
                     control={control}
-                    render={({ field: { onChange, value, ...restField }}) => (
+                    render={({ field: { onChange, value, ...restField }}) => ( // value is not directly used here due to file input nature
                         <Input 
                         type="file" 
                         id="screenshot" 
-                        accept="image/jpeg, image/png, image/gif, image/webp" 
+                        accept="image/jpeg,image/png,image/gif,image/webp" 
                         onChange={handleScreenshotChange}
-                        className={`${commonInputClass} file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-primary-foreground hover:file:bg-primary/90`}
-                        {...restField}
+                        className={`${commonInputClass} file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-primary file:text-primary-foreground hover:file:bg-primary/90 file:py-1 file:px-2 file:mr-2`}
+                        {...restField} // Passes 'name', 'onBlur', 'ref' from controller
                         />
                     )}
                 />
