@@ -11,9 +11,10 @@ import { Button } from '@/components/ui/button';
 import { exportJournalDataToCSV, importJournalDataFromCSV } from '@/lib/csv';
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Download, UploadCloud, DollarSign, ListChecks, Loader2, TrendingUp, TrendingDown, Percent, Hash } from 'lucide-react';
+import { Download, UploadCloud, DollarSign, ListChecks, Loader2, TrendingUp, TrendingDown, Percent, Hash, Landmark } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { nanoid } from 'nanoid';
+import { format } from 'date-fns';
 
 const calculateRRR = (direction?: JournalEntry['direction'], entryPrice?: number, slPrice?: number, tpPrice?: number): string => {
   if (!direction || !['Long', 'Short'].includes(direction) || entryPrice === undefined || slPrice === undefined || tpPrice === undefined) return "N/A";
@@ -56,9 +57,10 @@ export default function TradingJournalPage() {
   const [isPending, startTransition] = useTransition();
 
   // Stats
-  const [totalPL, setTotalPL] = useState<number>(0);
+  const [tradePL, setTradePL] = useState<number>(0); // P/L from Long/Short trades only
+  const [netAccountMovement, setNetAccountMovement] = useState<number>(0); // Total change including deposits/withdrawals
   const [numberOfActualTrades, setNumberOfActualTrades] = useState<number>(0);
-  const [accountPercentageChange, setAccountPercentageChange] = useState<number>(0);
+  const [accountPercentageChange, setAccountPercentageChange] = useState<number>(0); // Based on netAccountMovement
   const [winRate, setWinRate] = useState<number>(0);
 
   const { toast } = useToast();
@@ -69,19 +71,24 @@ export default function TradingJournalPage() {
   const areAccountDetailsLocked = journalEntries.length > 0;
 
   useEffect(() => {
-    const calculatedTotalPL = journalEntries.reduce((sum, entry) => sum + (entry.pl || 0), 0);
-    setTotalPL(calculatedTotalPL);
+    const calculatedTradePL = journalEntries
+      .filter(entry => entry.direction === 'Long' || entry.direction === 'Short')
+      .reduce((sum, entry) => sum + (entry.pl || 0), 0);
+    setTradePL(calculatedTradePL);
 
-    const newCurrentBalance = initialBalance + calculatedTotalPL;
+    const calculatedNetAccountMovement = journalEntries.reduce((sum, entry) => sum + (entry.pl || 0), 0);
+    setNetAccountMovement(calculatedNetAccountMovement);
+
+    const newCurrentBalance = initialBalance + calculatedNetAccountMovement;
     setCurrentBalance(newCurrentBalance);
-    setAccountBalanceForNewEntry(newCurrentBalance); // Update for new entries
+    setAccountBalanceForNewEntry(newCurrentBalance);
 
     const actualTrades = journalEntries.filter(entry => entry.direction === 'Long' || entry.direction === 'Short');
     setNumberOfActualTrades(actualTrades.length);
 
     if (initialBalance > 0 && initialBalance !== 0) {
-      setAccountPercentageChange((calculatedTotalPL / initialBalance) * 100);
-    } else if (calculatedTotalPL > 0) {
+      setAccountPercentageChange((calculatedNetAccountMovement / initialBalance) * 100);
+    } else if (calculatedNetAccountMovement > 0) {
       setAccountPercentageChange(100); 
     } else {
       setAccountPercentageChange(0);
@@ -111,10 +118,11 @@ export default function TradingJournalPage() {
 
   const handleSaveEntry = useCallback((entryData: Omit<JournalEntry, 'id' | 'accountBalanceAtEntry' | 'rrr'> | JournalEntry) => {
     startTransition(() => {
+      let newEntries;
       if ('id' in entryData && entryData.id) { 
         const rrr = calculateRRR(entryData.direction, entryData.entryPrice, entryData.slPrice, entryData.tpPrice);
         const updatedEntry = { ...entryData, rrr };
-        setJournalEntries(prevEntries => prevEntries.map(e => e.id === updatedEntry.id ? updatedEntry : e).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime() || a.time.localeCompare(b.time)));
+        newEntries = journalEntries.map(e => e.id === updatedEntry.id ? updatedEntry : e);
         toast({ title: "Entry Updated", description: `${updatedEntry.market} entry has been updated.` });
         setEditingEntry(null); 
       } else { 
@@ -122,15 +130,25 @@ export default function TradingJournalPage() {
         const newEntry: JournalEntry = {
           id: nanoid(), 
           ...entryData,
+          date: entryData.date instanceof Date ? entryData.date : new Date(entryData.date), // Ensure it's a Date object
           accountBalanceAtEntry: accountBalanceForNewEntry,
           rrr: rrr,
         } as JournalEntry; 
-        setJournalEntries(prevEntries => [...prevEntries, newEntry].sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime() || a.time.localeCompare(b.time)));
+        newEntries = [...journalEntries, newEntry];
         toast({ title: "Entry Added", description: `${newEntry.market} entry logged.` });
       }
+      // Sort entries by date and then by time
+      newEntries.sort((a, b) => {
+        const dateA = a.date instanceof Date ? a.date : new Date(a.date);
+        const dateB = b.date instanceof Date ? b.date : new Date(b.date);
+        const dateComparison = dateA.getTime() - dateB.getTime();
+        if (dateComparison !== 0) return dateComparison;
+        return a.time.localeCompare(b.time);
+      });
+      setJournalEntries(newEntries);
       journalFormComponentRef.current?.resetForm();
     });
-  }, [accountBalanceForNewEntry, toast]); 
+  }, [accountBalanceForNewEntry, toast, journalEntries]); 
 
   const handleSetEditingEntry = useCallback((entry: JournalEntry) => {
     setEditingEntry(entry);
@@ -178,11 +196,18 @@ export default function TradingJournalPage() {
             if (importedData) {
               setAccountName(importedData.accountName);
               setInitialBalance(importedData.initialBalance);
-              const entriesWithIds = importedData.entries.map(entry => ({
+              const entriesWithIdsAndDateObjects = importedData.entries.map(entry => ({
                 ...entry,
                 id: entry.id || nanoid(), 
-              })).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime() || a.time.localeCompare(b.time));
-              setJournalEntries(entriesWithIds as JournalEntry[]);
+                date: entry.date instanceof Date ? entry.date : new Date(entry.date) // Ensure date is a Date object
+              })).sort((a,b) => {
+                const dateA = a.date instanceof Date ? a.date : new Date(a.date);
+                const dateB = b.date instanceof Date ? b.date : new Date(b.date);
+                const dateComparison = dateA.getTime() - dateB.getTime();
+                if (dateComparison !== 0) return dateComparison;
+                return a.time.localeCompare(b.time);
+              });
+              setJournalEntries(entriesWithIdsAndDateObjects as JournalEntry[]);
               toast({ title: "Import Successful", description: "Journal data loaded from CSV." });
               setEditingEntry(null); 
               journalFormComponentRef.current?.resetForm();
@@ -270,17 +295,24 @@ export default function TradingJournalPage() {
                 </div>
             </div>
             <Separator className="my-4"/>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
               <div className="bg-muted p-3 rounded-md">
                 <Label className="font-headline text-xs text-muted-foreground flex items-center"><Hash className="mr-1 h-3 w-3"/>Total Actual Trades</Label>
                 <p className="font-bold text-lg font-headline">{numberOfActualTrades}</p>
               </div>
               <div className="bg-muted p-3 rounded-md">
                 <Label className="font-headline text-xs text-muted-foreground flex items-center">
-                  {(totalPL >= 0) ? <TrendingUp className="mr-1 h-3 w-3 text-positive"/> : <TrendingDown className="mr-1 h-3 w-3 text-negative"/>}
-                  Total P/L ($)
+                  {(tradePL >= 0) ? <TrendingUp className="mr-1 h-3 w-3 text-positive"/> : <TrendingDown className="mr-1 h-3 w-3 text-negative"/>}
+                  Trade P/L ($)
                 </Label>
-                <p className={`font-bold text-lg font-headline ${totalPL >= 0 ? 'text-positive' : 'text-negative'}`}>{totalPL.toFixed(2)}</p>
+                <p className={`font-bold text-lg font-headline ${tradePL >= 0 ? 'text-positive' : 'text-negative'}`}>{tradePL.toFixed(2)}</p>
+              </div>
+              <div className="bg-muted p-3 rounded-md">
+                <Label className="font-headline text-xs text-muted-foreground flex items-center">
+                  {(netAccountMovement >= 0) ? <Landmark className="mr-1 h-3 w-3 text-positive"/> : <Landmark className="mr-1 h-3 w-3 text-negative"/>}
+                  Net Account Movement ($)
+                </Label>
+                <p className={`font-bold text-lg font-headline ${netAccountMovement >= 0 ? 'text-positive' : 'text-negative'}`}>{netAccountMovement.toFixed(2)}</p>
               </div>
               <div className="bg-muted p-3 rounded-md">
                 <Label className="font-headline text-xs text-muted-foreground flex items-center">
