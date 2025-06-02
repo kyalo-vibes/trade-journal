@@ -2,14 +2,10 @@
 import { format, parseISO } from 'date-fns';
 import type { JournalEntry, JournalData, TradeDirection } from './types';
 
-// Headers for CSV export and import.
-// Note: 'accountName' and 'initialBalance' are part of JournalData, not JournalEntry.
-// They will be included in each row for export to simplify having one CSV structure.
-// During import, the first row's accountName and initialBalance will be used for the account.
 const CSV_COLUMN_ORDER: (keyof JournalEntry | 'accountName' | 'initialBalance')[] = [
   'accountName', 
   'initialBalance',
-  'id', // Firestore ID will be included on export, ignored on import (new IDs generated)
+  'id', 
   'date', 
   'time', 
   'direction', 
@@ -22,7 +18,7 @@ const CSV_COLUMN_ORDER: (keyof JournalEntry | 'accountName' | 'initialBalance')[
   'actualExitPrice', 
   'rrr', 
   'pl', 
-  'screenshot', // Will store "has_screenshot" or similar; actual image data not in CSV
+  'screenshot', 
   'notes', 
   'disciplineRating', 
   'emotionalState', 
@@ -31,12 +27,9 @@ const CSV_COLUMN_ORDER: (keyof JournalEntry | 'accountName' | 'initialBalance')[
   'reasonForExit'
 ];
 
-// Helper to serialize a value for CSV, handling quotes and commas.
 const serializeCSVValue = (value: any): string => {
   if (value === null || value === undefined) return '';
   const stringValue = String(value);
-  // If the value contains a comma, newline, or double quote, enclose it in double quotes.
-  // Also, double up any existing double quotes within the value.
   if (stringValue.includes(',') || stringValue.includes('\n') || stringValue.includes('"')) {
     return `"${stringValue.replace(/"/g, '""')}"`;
   }
@@ -50,13 +43,12 @@ export function exportJournalDataToCSV(data: JournalData): void {
   
   const rows = entries.map(entry => {
     const entryDataForCSV: Record<string, any> = {
-      accountName, // Add accountName to each row
-      initialBalance, // Add initialBalance to each row
+      accountName,
+      initialBalance,
       ...entry,
       date: entry.date instanceof Date ? format(entry.date, 'yyyy-MM-dd') : String(entry.date),
-      screenshot: entry.screenshot && entry.screenshot.startsWith('data:image') ? 'has_screenshot' : '', // Indicate presence
+      screenshot: entry.screenshot && entry.screenshot.startsWith('data:image') ? 'has_screenshot_base64' : (entry.screenshot || ''),
     };
-
     return CSV_COLUMN_ORDER.map(header => serializeCSVValue(entryDataForCSV[header])).join(',');
   });
 
@@ -77,7 +69,6 @@ export function exportJournalDataToCSV(data: JournalData): void {
   }
 }
 
-// Basic CSV row parser that handles quoted fields containing commas and escaped quotes
 function parseCSVRow(rowString: string): string[] {
   const values = [];
   let currentVal = '';
@@ -86,9 +77,8 @@ function parseCSVRow(rowString: string): string[] {
     const char = rowString[i];
     if (char === '"') {
       if (inQuotes && i + 1 < rowString.length && rowString[i+1] === '"') {
-        // Escaped quote " "
         currentVal += '"';
-        i++; // Skip next quote
+        i++; 
       } else {
         inQuotes = !inQuotes;
       }
@@ -99,7 +89,7 @@ function parseCSVRow(rowString: string): string[] {
       currentVal += char;
     }
   }
-  values.push(currentVal); // Add last value
+  values.push(currentVal); 
   return values.map(v => v.trim());
 }
 
@@ -107,12 +97,11 @@ function parseCSVRow(rowString: string): string[] {
 export function importJournalDataFromCSV(csvString: string): JournalData | null {
   try {
     const lines = csvString.split('\n').map(line => line.trim()).filter(line => line);
-    if (lines.length < 1) return null; // Must have at least a header row
+    if (lines.length < 1) return null;
 
     const headerLine = lines[0];
     const headers = parseCSVRow(headerLine).map(h => h.replace(/^"|"$/g, '').trim() as keyof JournalEntry | 'accountName' | 'initialBalance');
     
-    // Determine column indices
     const colIndices: Partial<Record<keyof JournalEntry | 'accountName' | 'initialBalance', number>> = {};
     CSV_COLUMN_ORDER.forEach(colName => {
         const index = headers.indexOf(colName);
@@ -121,31 +110,33 @@ export function importJournalDataFromCSV(csvString: string): JournalData | null 
         }
     });
 
-
     let accountName = "Imported Account";
     let initialBalance = 0;
-    const entries: JournalEntry[] = [];
+    const entries: Omit<JournalEntry, 'id'>[] = []; // For import, we omit ID as DB will generate it
 
-    // Attempt to get accountName and initialBalance from the first data row if present
     if (lines.length > 1 && colIndices.accountName !== undefined && colIndices.initialBalance !== undefined) {
         const firstDataRowValues = parseCSVRow(lines[1]);
-        accountName = firstDataRowValues[colIndices.accountName!] || accountName;
-        initialBalance = parseFloat(firstDataRowValues[colIndices.initialBalance!]) || initialBalance;
+        const parsedAccountName = firstDataRowValues[colIndices.accountName!];
+        if (parsedAccountName) accountName = parsedAccountName;
+        
+        const parsedInitialBalance = parseFloat(firstDataRowValues[colIndices.initialBalance!]);
+        if (!isNaN(parsedInitialBalance)) initialBalance = parsedInitialBalance;
     }
     
-    const dataRows = lines.slice(1); // All lines except the header
+    const dataRows = lines.slice(1);
 
     for (const line of dataRows) {
       const values = parseCSVRow(line);
-      if (values.length < headers.length) { // Allow more values, but not less
+      if (values.length < headers.length) {
         console.warn(`Skipping malformed row: Expected at least ${headers.length} values, got ${values.length}. Row: ${line}`);
         continue;
       }
 
-      const entry: Partial<JournalEntry> = {};
+      const entry: Partial<Omit<JournalEntry, 'id'>> = {};
 
-      // Use colIndices to map values to entry properties
       (Object.keys(colIndices) as Array<keyof typeof colIndices>).forEach(key => {
+        if (key === 'id') return; // Skip ID for new entries
+
         const index = colIndices[key]!;
         const value = values[index];
 
@@ -154,15 +145,13 @@ export function importJournalDataFromCSV(csvString: string): JournalData | null 
           return;
         }
         
-        // Type conversions
         switch (key) {
-          case 'id': entry.id = value; break; // Will be overridden by Firestore, but good to parse
           case 'date': 
-            const parsedDate = parseISO(value); // date-fns parseISO for yyyy-MM-dd
+            const parsedDate = parseISO(value);
             if (!isNaN(parsedDate.getTime())) {
                  entry.date = parsedDate;
             } else {
-                entry.date = new Date(); // fallback, or handle error
+                entry.date = new Date(); 
                 console.warn(`Invalid date format for row: ${value}. Using current date.`);
             }
             break;
@@ -181,30 +170,30 @@ export function importJournalDataFromCSV(csvString: string): JournalData | null 
           case 'disciplineRating':
             const rating = parseInt(value, 10);
             if (rating >= 1 && rating <= 5) entry.disciplineRating = rating as 1 | 2 | 3 | 4 | 5;
-            else entry.disciplineRating = 3; // fallback
+            else entry.disciplineRating = 3;
             break;
           case 'rrr': entry.rrr = value; break;
           case 'screenshot':
-            entry.screenshot = value === 'has_screenshot' ? 'Screenshot was present (re-upload if needed)' : undefined;
+            entry.screenshot = value === 'has_screenshot_base64' ? 'Screenshot was present (re-upload if needed from original source)' : (value || undefined);
             break;
           case 'notes': entry.notes = value; break;
           case 'emotionalState': entry.emotionalState = value; break;
           case 'session': entry.session = value; break;
           case 'reasonForEntry': entry.reasonForEntry = value; break;
           case 'reasonForExit': entry.reasonForExit = value; break;
+          // 'accountName' and 'initialBalance' are handled for the JournalData object, not individual entries
+          case 'accountName': break;
+          case 'initialBalance': break;
           default:
-            // For 'accountName' and 'initialBalance', they are handled above.
-            // Any other unknown keys from CSV_COLUMN_ORDER can be ignored for the entry object.
+            // This ensures type safety if a key is in JournalEntry but not explicitly handled above.
+            // It might be an error or an oversight.
+            // (entry as any)[key] = value; 
             break;
         }
       });
       
-      // Basic validation for a journal entry
       if (entry.date && entry.time && entry.direction && entry.market && entry.accountBalanceAtEntry !== undefined && entry.disciplineRating) {
-         // Firestore will generate an ID, so we don't strictly need one from CSV for new entries.
-         // If an ID was parsed, it might be used for update logic if desired, but here we assume new entries.
-         if (!entry.id) entry.id = `csv_import_${Date.now()}_${Math.random().toString(36).substring(2,7)}`;
-         entries.push(entry as JournalEntry);
+         entries.push(entry as Omit<JournalEntry, 'id'>);
       } else {
         console.warn("Skipping row due to missing required fields or parse errors. Parsed data:", entry, "Original line:", line);
       }
@@ -221,4 +210,3 @@ export function importJournalDataFromCSV(csvString: string): JournalData | null 
     return null;
   }
 }
-
