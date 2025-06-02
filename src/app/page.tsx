@@ -13,7 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Download, UploadCloud, DollarSign, ListChecks, Loader2, TrendingUp, TrendingDown, Percent, Hash } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
-import { nanoid } from 'nanoid'; // For generating unique IDs locally
+import { nanoid } from 'nanoid';
 
 const calculateRRR = (direction?: JournalEntry['direction'], entryPrice?: number, slPrice?: number, tpPrice?: number): string => {
   if (!direction || direction === 'No Trade' || entryPrice === undefined || slPrice === undefined || tpPrice === undefined) return "N/A";
@@ -75,14 +75,13 @@ export default function TradingJournalPage() {
 
     setAccountBalanceForNewEntry(newCurrentBalance);
 
-    // Calculate other stats
     const actualTrades = journalEntries.filter(entry => entry.direction === 'Long' || entry.direction === 'Short');
     setNumberOfActualTrades(actualTrades.length);
 
-    if (initialBalance > 0 && initialBalance !== 0) { // Avoid division by zero
+    if (initialBalance > 0 && initialBalance !== 0) {
       setAccountPercentageChange((calculatedTotalPL / initialBalance) * 100);
     } else if (calculatedTotalPL > 0) {
-      setAccountPercentageChange(100); // If initial balance was 0 and P/L is positive, it's 100% gain effectively
+      setAccountPercentageChange(100); 
     }
      else {
       setAccountPercentageChange(0);
@@ -116,14 +115,14 @@ export default function TradingJournalPage() {
         setEditingEntry(null); 
       } else { 
         const rrr = calculateRRR(entryData.direction, entryData.entryPrice, entryData.slPrice, entryData.tpPrice);
-        const entryToAdd: JournalEntry = {
-          id: nanoid(), // Generate unique ID locally
+        const newEntry: JournalEntry = {
+          id: nanoid(), 
           ...entryData,
-          accountBalanceAtEntry: accountBalanceForNewEntry,
+          accountBalanceAtEntry: accountBalanceForNewEntry, // Use current balance for new entries
           rrr: rrr,
-        };
-        setJournalEntries(prevEntries => [...prevEntries, entryToAdd].sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime() || a.time.localeCompare(b.time)));
-        toast({ title: "Entry Added", description: `Trade for ${entryData.market} logged.` });
+        } as JournalEntry; // Cast to ensure all required fields are there
+        setJournalEntries(prevEntries => [...prevEntries, newEntry].sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime() || a.time.localeCompare(b.time)));
+        toast({ title: "Entry Added", description: `Trade for ${newEntry.market} logged.` });
       }
       journalFormComponentRef.current?.resetForm();
     });
@@ -175,7 +174,6 @@ export default function TradingJournalPage() {
             if (importedData) {
               setAccountName(importedData.accountName);
               setInitialBalance(importedData.initialBalance);
-              // Ensure imported entries have unique IDs if not present or to avoid conflicts
               const entriesWithIds = importedData.entries.map(entry => ({
                 ...entry,
                 id: entry.id || nanoid(), 
@@ -287,10 +285,10 @@ export default function TradingJournalPage() {
               </div>
               <div className="bg-muted p-3 rounded-md">
                 <Label className="font-headline text-xs text-muted-foreground flex items-center">
-                  {(winRate >= 50) ? <TrendingUp className="mr-1 h-3 w-3 text-positive"/> : <TrendingDown className="mr-1 h-3 w-3 text-negative"/>}
+                  {(winRate >= 0) ? <TrendingUp className="mr-1 h-3 w-3 text-positive"/> : <TrendingDown className="mr-1 h-3 w-3 text-negative"/>}
                   Win Rate
                   </Label>
-                <p className={`font-bold text-lg font-headline ${winRate >= 50 ? 'text-positive' : 'text-negative'}`}>{winRate.toFixed(2)}%</p>
+                <p className={`font-bold text-lg font-headline ${winRate >= 0 ? 'text-positive' : 'text-negative'}`}>{winRate.toFixed(2)}%</p>
               </div>
             </div>
         </CardContent>

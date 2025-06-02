@@ -25,15 +25,16 @@ import { format } from 'date-fns';
 
 const entrySchema = z.object({
   date: z.date({ required_error: 'Date is required.' }),
-  time: z.string().regex(/^([01]\d|2[0-3]):([0-5]\d)$/, 'Invalid time format (HH:MM).'),
+  entryHour: z.string({ required_error: 'Hour is required.'}),
+  entryMinute: z.string({ required_error: 'Minute is required.'}),
   direction: z.enum(['Long', 'Short', 'No Trade'], { required_error: 'Direction is required.' }),
   market: z.string().min(1, 'Market is required.'),
   entryPrice: z.coerce.number().optional(),
   positionSize: z.coerce.number().optional(),
   slPrice: z.coerce.number().optional(),
   tpPrice: z.coerce.number().optional(),
-  actualExitPrice: z.coerce.number().optional(), // Optional for ongoing trades
-  pl: z.coerce.number().optional(), // Optional for ongoing trades
+  actualExitPrice: z.coerce.number().optional(), 
+  pl: z.coerce.number().optional(), 
   screenshot: z.any().optional(),
   notes: z.string().optional(),
   disciplineRating: z.coerce.number().min(1).max(5),
@@ -90,19 +91,18 @@ const calculateRRR = (direction?: TradeDirection, entryPrice?: number, slPrice?:
   return (reward / risk).toFixed(2) + ":1";
 };
 
-const getDefaultTime = () => {
+const getDefaultHourMinute = () => {
     const now = new Date();
-    return format(now, 'HH:mm');
+    return {
+        hour: format(now, 'HH'),
+        minute: format(now, 'mm'),
+    };
 };
 
-const marketOptions = [
-  'SPX500', 'NASDAQ100', 'DOW30', 
-  'EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 
-  'BTCUSD', 'ETHUSD', 'SOLUSD', 
-  'AAPL', 'TSLA', 'MSFT', 'AMZN', 'GOOGL',
-  'Gold (XAUUSD)', 'Crude Oil (WTI)', 'Natural Gas',
-  'Other Forex', 'Other Crypto', 'Other Stock', 'Other Commodity', 'Other Index'
-];
+const marketOptions = ['NAS100', 'EURUSD', 'XAUUSD', 'SPX500', 'Other'];
+
+const hourOptions = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
+const minuteOptions = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
 
 
 export const JournalEntryForm = forwardRef(({ onSave, accountBalanceAtFormInit, disabled, entryToEdit, onCancelEdit }, ref) => {
@@ -110,7 +110,8 @@ export const JournalEntryForm = forwardRef(({ onSave, accountBalanceAtFormInit, 
     resolver: zodResolver(entrySchema),
     defaultValues: {
       date: new Date(),
-      time: getDefaultTime(),
+      entryHour: getDefaultHourMinute().hour,
+      entryMinute: getDefaultHourMinute().minute,
       direction: undefined,
       market: '',
       entryPrice: undefined,
@@ -145,9 +146,11 @@ export const JournalEntryForm = forwardRef(({ onSave, accountBalanceAtFormInit, 
 
   useImperativeHandle(ref, () => ({
     resetForm: () => {
+      const { hour, minute } = getDefaultHourMinute();
       reset({
         date: new Date(),
-        time: getDefaultTime(),
+        entryHour: hour,
+        entryMinute: minute,
         direction: undefined,
         market: '',
         entryPrice: undefined,
@@ -171,11 +174,14 @@ export const JournalEntryForm = forwardRef(({ onSave, accountBalanceAtFormInit, 
 
   useEffect(() => {
     if (entryToEdit) {
-      const defaultTime = entryToEdit.time || getDefaultTime();
+      const { hour: defaultHour, minute: defaultMinute } = getDefaultHourMinute();
+      const [entryH = defaultHour, entryM = defaultMinute] = entryToEdit.time ? entryToEdit.time.split(':') : [defaultHour, defaultMinute];
+      
       reset({
         ...entryToEdit,
         date: entryToEdit.date ? new Date(entryToEdit.date) : new Date(),
-        time: defaultTime,
+        entryHour: entryH,
+        entryMinute: entryM,
         entryPrice: entryToEdit.entryPrice ?? undefined,
         positionSize: entryToEdit.positionSize ?? undefined,
         slPrice: entryToEdit.slPrice ?? undefined,
@@ -192,9 +198,11 @@ export const JournalEntryForm = forwardRef(({ onSave, accountBalanceAtFormInit, 
         setScreenshotName(null);
       }
     } else {
+      const { hour, minute } = getDefaultHourMinute();
       reset({ 
         date: new Date(),
-        time: getDefaultTime(),
+        entryHour: hour,
+        entryMinute: minute,
         direction: undefined,
         market: '',
         entryPrice: undefined,
@@ -232,39 +240,44 @@ export const JournalEntryForm = forwardRef(({ onSave, accountBalanceAtFormInit, 
 
   const isTrade = direction !== 'No Trade';
 
-  const handleFormSubmit = async (data: JournalEntryFormData) => {
+  const handleFormSubmit = async (formData: JournalEntryFormData) => {
     let screenshotData: string | undefined = undefined;
-    if (data.screenshot && data.screenshot instanceof FileList && data.screenshot.length > 0) {
-      const file = data.screenshot[0];
+    if (formData.screenshot && formData.screenshot instanceof FileList && formData.screenshot.length > 0) {
+      const file = formData.screenshot[0];
       screenshotData = await new Promise((resolve) => {
         const reader = new FileReader();
         reader.onloadend = () => resolve(reader.result as string);
         reader.readAsDataURL(file);
       });
-    } else if (typeof data.screenshot === 'string') { 
-        screenshotData = data.screenshot;
+    } else if (typeof formData.screenshot === 'string') { 
+        screenshotData = formData.screenshot;
     }
     
-    const submissionData: Omit<JournalEntry, 'id' | 'accountBalanceAtEntry' | 'rrr'> | JournalEntry = {
-      ...data,
-      date: data.date, 
-      pl: data.pl ?? undefined,
-      entryPrice: data.entryPrice ?? undefined,
-      positionSize: data.positionSize ?? undefined,
-      slPrice: data.slPrice ?? undefined,
-      tpPrice: data.tpPrice ?? undefined,
-      actualExitPrice: data.actualExitPrice ?? undefined,
+    const time = `${formData.entryHour}:${formData.entryMinute}`;
+    
+    const dataToSave = {
+      ...formData, 
+      time, 
+      date: formData.date, 
       screenshot: screenshotData,
+      entryPrice: formData.entryPrice ?? undefined,
+      positionSize: formData.positionSize ?? undefined,
+      slPrice: formData.slPrice ?? undefined,
+      tpPrice: formData.tpPrice ?? undefined,
+      actualExitPrice: formData.actualExitPrice ?? undefined,
+      pl: formData.pl ?? undefined,
     };
+
+    const { entryHour, entryMinute, ...finalSaveData } = dataToSave;
 
     if (isEditing && entryToEdit) {
       onSave({ 
         ...entryToEdit, 
-        ...submissionData,
+        ...finalSaveData,
         accountBalanceAtEntry: entryToEdit.accountBalanceAtEntry, 
       } as JournalEntry);
     } else {
-      const { id, accountBalanceAtEntry, ...newEntryData } = submissionData as JournalEntry; 
+      const { id, accountBalanceAtEntry, ...newEntryData } = finalSaveData as JournalEntry; 
       onSave(newEntryData as Omit<JournalEntry, 'id' | 'accountBalanceAtEntry' | 'rrr'>);
     }
   };
@@ -318,15 +331,45 @@ export const JournalEntryForm = forwardRef(({ onSave, accountBalanceAtFormInit, 
                 {errors.date && <p className="text-destructive text-xs mt-1">{errors.date.message}</p>}
               </div>
 
-              <div>
-                <Label htmlFor="time" className={commonLabelClass}>{isTrade ? 'Time Entered' : 'Time Analyzed'}</Label>
-                <Controller
-                  name="time"
-                  control={control}
-                  render={({ field }) => <Input type="time" id="time" {...field} className={commonInputClass} />}
-                />
-                {errors.time && <p className="text-destructive text-xs mt-1">{errors.time.message}</p>}
+              <div className="col-span-1 lg:col-span-1 grid grid-cols-2 gap-2">
+                <div>
+                    <Label htmlFor="entryHour" className={commonLabelClass}>{isTrade ? 'Hour Ent.' : 'Hr. Anl.'}</Label>
+                    <Controller
+                    name="entryHour"
+                    control={control}
+                    render={({ field }) => (
+                        <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value}>
+                        <SelectTrigger id="entryHour" className={commonInputClass}>
+                            <SelectValue placeholder="HH" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {hourOptions.map(h => <SelectItem key={h} value={h}>{h}</SelectItem>)}
+                        </SelectContent>
+                        </Select>
+                    )}
+                    />
+                    {errors.entryHour && <p className="text-destructive text-xs mt-1">{errors.entryHour.message}</p>}
+                </div>
+                <div>
+                    <Label htmlFor="entryMinute" className={commonLabelClass}>{isTrade ? 'Min Ent.' : 'Min Anl.'}</Label>
+                    <Controller
+                    name="entryMinute"
+                    control={control}
+                    render={({ field }) => (
+                        <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value}>
+                        <SelectTrigger id="entryMinute" className={commonInputClass}>
+                            <SelectValue placeholder="MM" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {minuteOptions.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                        </SelectContent>
+                        </Select>
+                    )}
+                    />
+                    {errors.entryMinute && <p className="text-destructive text-xs mt-1">{errors.entryMinute.message}</p>}
+                </div>
               </div>
+
 
               <div>
                 <Label htmlFor="direction" className={commonLabelClass}>Direction</Label>
@@ -451,14 +494,14 @@ export const JournalEntryForm = forwardRef(({ onSave, accountBalanceAtFormInit, 
                 <Controller
                     name="screenshot"
                     control={control}
-                    render={({ field: { onChange, value, ...restField }}) => ( // value is not directly used here due to file input nature
+                    render={({ field: { onChange, value, ...restField }}) => ( 
                         <Input 
                         type="file" 
                         id="screenshot" 
                         accept="image/jpeg,image/png,image/gif,image/webp" 
                         onChange={handleScreenshotChange}
-                        className={`${commonInputClass} file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-primary file:text-primary-foreground hover:file:bg-primary/90 file:py-1 file:px-2 file:mr-2`}
-                        {...restField} // Passes 'name', 'onBlur', 'ref' from controller
+                        className={`${commonInputClass} file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-primary file:text-primary-foreground hover:file:bg-primary/90`}
+                        {...restField} 
                         />
                     )}
                 />
